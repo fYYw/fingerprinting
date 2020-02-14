@@ -53,7 +53,7 @@ def add_train_args(args=None):
     args.add_argument('--epoch', type=int, default=40)
     args.add_argument('--update_iter', type=int, default=1)
     args.add_argument('--grad_clip', type=float, default=1.)
-    args.add_argument('--check_epoch', type=int, default=-1)
+    args.add_argument('--use_entire_example_epoch', type=int, default=5)
     args.add_argument('--batch_size', type=int, default=128)
     args.add_argument('--update_size', type=int, default=1, help='Backward() without gradient step.')
     args.add_argument('--check_step', type=int, default=100, help='Validate every # steps. ')

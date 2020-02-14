@@ -51,7 +51,10 @@ class Pipeline(object):
 
     def run(self):
         for e in range(self.epoch):
-            train_examples = self.data_io.build_entire_examples()
+            if self.config['use_entire_example_epoch'] > 3:
+                train_examples = self.data_io.build_entire_examples()
+            else:
+                train_examples = self.data_io.build_examples(1.0, split='train')
             train_iter = self.data_io.build_iter_idx(train_examples, True)
             for i, batch_idx in enumerate(train_iter):
                 loss = self.get_loss(batch_idx, train_examples, self.train_loss)

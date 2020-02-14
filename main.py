@@ -57,7 +57,7 @@ def main():
               'epoch': args.epoch,
               'update_iter': args.update_iter,
               'grad_clip': args.grad_clip,
-              'check_epoch': args.check_epoch,
+              'use_entire_example_epoch': args.use_entire_example_epoch,
               'batch_size': args.batch_size,
               'update_size': args.update_size,
               'check_step': args.check_step,
