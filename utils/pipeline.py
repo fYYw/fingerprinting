@@ -81,28 +81,27 @@ class Pipeline(object):
                     print(train_log)
                     self.train_procedure.append(train_log)
 
-                    if e > self.config['check_epoch']:
-                        high_dev_perf, _ = self.get_perf(self.high_dev_iter, self.high_dev_examples)
-                        # print('HIGH DEV: ', high_dev_perf)
+                    high_dev_perf, _ = self.get_perf(self.high_dev_iter, self.high_dev_examples)
+                    # print('HIGH DEV: ', high_dev_perf)
 
-                        if high_dev_perf['mean'] > self.dev_perf['mean']:
-                            self.dev_perf = high_dev_perf
-                            low_dev_perf, _ = self.get_perf(self.low_dev_iter, self.low_dev_examples)
+                    if high_dev_perf['mean'] > self.dev_perf['mean']:
+                        self.dev_perf = high_dev_perf
+                        low_dev_perf, _ = self.get_perf(self.low_dev_iter, self.low_dev_examples)
 
-                            torch.save({'model': self.model.state_dict(),
-                                        'adam': self.sgd.state_dict()},
-                                       os.path.join(self.config['root_folder'],
-                                                    self.config['outlet'], 'best_model.pt'))
-                            test_perf, test_preds = self.get_perf(self.test_iter, self.test_examples)
-                            self.test_perf = test_perf
+                        torch.save({'model': self.model.state_dict(),
+                                    'adam': self.sgd.state_dict()},
+                                   os.path.join(self.config['root_folder'],
+                                                self.config['outlet'], 'best_model.pt'))
+                        test_perf, test_preds = self.get_perf(self.test_iter, self.test_examples)
+                        self.test_perf = test_perf
 
-                            json.dump(test_perf, open(os.path.join(
-                                self.config['root_folder'], self.config['outlet'], 'test_perf.json'), 'w'))
-                            with open(os.path.join(self.config['root_folder'],
-                                                   self.config['outlet'], 'test_pred.jsonl'), 'w') as f:
-                                for pred in test_preds:
-                                    data = json.dumps(pred)
-                                    f.write(data)
+                        json.dump(test_perf, open(os.path.join(
+                            self.config['root_folder'], self.config['outlet'], 'test_perf.json'), 'w'))
+                        with open(os.path.join(self.config['root_folder'],
+                                               self.config['outlet'], 'test_pred.jsonl'), 'w') as f:
+                            for pred in test_preds:
+                                data = json.dumps(pred)
+                                f.write(data)
 
             print('BEST DEV: ', self.dev_perf)
             print('LOw DEV: ', low_dev_perf)
