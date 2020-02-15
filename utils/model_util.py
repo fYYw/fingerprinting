@@ -7,6 +7,75 @@ from torch.nn.utils.rnn import pad_packed_sequence as unpack
 import numpy as np
 
 
+class SentimentModel(nn.Module):
+    def __init__(self,
+                 config):
+        super(SentimentModel, self).__init__()
+        self.token_encoder = getattr(nn, config['rnn_type'].upper())(
+            input_size=config['token_dim'], hidden_size=config['hid_dim'] // 2,
+            num_layers=1, dropout=config['dropout'],
+            batch_first=True, bidirectional=True)
+        self.vader_predict = nn.Sequential(
+            nn.Linear(config['hid_dim'], config['sentiment_dim']),
+            nn.ReLU(),
+            nn.Linear(config['sentiment_dim'], 3))
+        self.flair_predict = nn.Sequential(
+            nn.Linear(config['hid_dim'], config['sentiment_dim']),
+            nn.ReLU(),
+            nn.Linear(config['sentiment_dim'], 3))
+        self.blob_sent = nn.Sequential(
+            nn.Linear(config['hid_dim'], config['sentiment_dim']),
+            nn.ReLU(),
+            nn.Linear(config['sentiment_dim'], 3))
+        self.blob_subj = nn.Sequential(
+            nn.Linear(config['hid_dim'], config['sentiment_dim']),
+            nn.ReLU(),
+            nn.Linear(config['sentiment_dim'], 3))
+
+    def forward(self, write_track, sentiments, device):
+        write_track = [torch.tensor(w, device=device) for w in write_track]
+        seq_len = write_track[2].view(-1, write_track[0].size(1)).sum(-1)
+        _, w_ht = self._encode_seq_seq_(write_track[0], write_track[1])  # b, s, h
+        full_w = w_ht.view(w_ht.size(0), -1)
+        non_mask_idx = write_track[2].view(-1).nonzero()
+        non_mask_w = full_w.index_select(0, non_mask_idx)
+        loss = 0
+        vader_target = torch.tensor(sentiments[0], device=device)
+
+    def _encode_seq_seq_(self, seq_seq_tensor, token_mask):
+        batch_size, seq_len, token_size = seq_seq_tensor.size()
+        token_encode_mtx = seq_seq_tensor.view(-1, token_size)
+        token_len = token_mask.view(-1, token_size).sum(-1)
+        # token_sorted_len, token_order, token_track = sort_tensor_len(token_len)
+
+        embeds, ht = self._rnn_encode_(self.token_encoder, self.token_embedding(token_encode_mtx),
+                                       token_len)
+        embeds = embeds.view(batch_size, seq_len, token_size, embeds.size(-1))
+        ht = ht.view(batch_size, seq_len, ht.size(-1))
+        return embeds, ht
+
+    def _rnn_encode_(self, rnn, x, length, order=None, track=None):
+        if len(x.size()) == 3:
+            batch_size, seq_len, token_num = x.size()
+        elif len(x.size()) == 2:
+            batch_size, token_num = x.size()
+        else:
+            raise NotImplementedError("Not support input dimensions {}".format(x.size()))
+
+        if order is not None:
+            x = x.index_select(0, order)
+        x = self.dropout(x)
+        x = pack(x, length, batch_first=True, enforce_sorted=False)
+        outputs, h_t = rnn(x)
+        outputs = unpack(outputs, batch_first=True)[0]
+        if isinstance(h_t, tuple):
+            h_t = h_t[0]
+        if track is not None:
+            outputs = outputs[track]
+            h_t = h_t.index_select(1, track).transpose(0, 1).contiguous()
+        return outputs, h_t.view(batch_size, -1)
+
+
 class Model(nn.Module):
     def __init__(self,
                  config):

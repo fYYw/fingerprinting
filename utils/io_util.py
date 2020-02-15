@@ -263,9 +263,10 @@ class IO(object):
             print("Bulid full examples ..")
             return full_records(self.authors, self.previous_cnt, split)
 
-    def build_split_examples(self, split='dev'):
+    def build_split_examples(self, split='dev', min_count=0):
+        min_cnt = min_count if min_count > 1 else self.min_comment_cnt
         return full_records_frequency(self.authors, previous_cnt=self.previous_cnt,
-                                      min_cnt=self.min_comment_cnt, split=split)
+                                      min_cnt=min_cnt, split=split)
 
     def build_entire_examples(self):
         return total_records(self.authors, previous_cnt=self.previous_cnt)
