@@ -94,12 +94,12 @@ def total_records(author_dict, previous_cnt=6):
     return examples
 
 
-def full_records_frequency(author_dict, previous_cnt=6, split='dev'):
+def full_records_frequency(author_dict, previous_cnt=6, min_cnt=6, split='dev'):
     high_examples, high_idx = {}, 0
     low_examples, low_idx = {}, 0
 
     for author, history in author_dict.items():
-        if len(history) > previous_cnt:
+        if len(history) > min_cnt:
             if split == 'train':
                 high_examples[high_idx] = (author, history[-previous_cnt - 2: -2])
             elif split == 'dev':
@@ -118,24 +118,24 @@ def full_records_frequency(author_dict, previous_cnt=6, split='dev'):
     return high_examples, low_examples
 
 
-def sample_records(author_dict, previous_cnt=6, split='train'):
+def sample_records(author_dict, previous_cnt=6, min_cnt=-1, split='train'):
     examples, example_idx = {}, 0
     if split == 'dev' or split == 'test':
         examples = full_records(author_dict, previous_cnt, split=split)
     else:
-        author_cnt = [len(cmts) for author, cmts in author_dict.items()]
-        total_cnt = sum(author_cnt)
-        author_prob = [1.0 * cnt / total_cnt for cnt in author_cnt]
-        sampled_author = np.random.choice(list(author_dict.keys()),
-                                          size=len(author_dict),
+        author_cnt = [(author, len(cmts)) for author, cmts in author_dict.items() if len(cmts) > min_cnt]
+        total_cnt = sum([a[1] for a in author_cnt])
+        author_prob = [1.0 * cnt[1] / total_cnt for cnt in author_cnt]
+        sampled_author = np.random.choice(author_cnt,
+                                          size=len(author_cnt),
                                           p=author_prob)
-        for author in sampled_author:
+        for (author, cnt) in sampled_author:
             history = author_dict[author][1:-2]  # dont account dev and test
             if len(history) < previous_cnt:
                 examples[example_idx] = (author, history)
             else:
                 random_idx = np.random.choice(range(1, len(history)), size=1)[0]
-                examples[example_idx] = (author, history[max(0, random_idx - previous_cnt): random_idx])
+                examples[example_idx] = (author, history[max(0, random_idx - previous_cnt): random_idx + 1])
             example_idx += 1
     return examples
 
@@ -219,6 +219,7 @@ class IO(object):
                  batch_size=64,
                  max_seq_len=128,
                  previous_comment_cnt=6,
+                 min_comment_cnt=6,
                  target_sentiment=True,
                  target_emotion=False):
         self.authors = json.load(open(os.path.join(folder_path, 'frequent_author_record.json')))
@@ -233,6 +234,7 @@ class IO(object):
         self.target_emotion = target_emotion
 
         self.previous_cnt = previous_comment_cnt
+        self.min_comment_cnt = min_comment_cnt
         self.max_seq_len = max_seq_len
 
     def load_vocab(self, folder):
@@ -253,11 +255,17 @@ class IO(object):
             print("Build samples by frequency ..")
             return sample_records(self.authors, self.previous_cnt, split)
         else:
+            if self.min_comment_cnt > 1:
+                print("Bulid high frequent examples ..")
+                examples, _ = full_records_frequency(self.authors, previous_cnt=self.previous_cnt,
+                                                     min_cnt=self.min_comment_cnt, split=split)
+                return examples
             print("Bulid full examples ..")
             return full_records(self.authors, self.previous_cnt, split)
 
     def build_split_examples(self, split='dev'):
-        return full_records_frequency(self.authors, previous_cnt=self.previous_cnt, split=split)
+        return full_records_frequency(self.authors, previous_cnt=self.previous_cnt,
+                                      min_cnt=self.min_comment_cnt, split=split)
 
     def build_entire_examples(self):
         return total_records(self.authors, previous_cnt=self.previous_cnt)

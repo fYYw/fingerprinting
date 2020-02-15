@@ -63,6 +63,7 @@ def main():
               'check_step': args.check_step,
               'random_seed': args.random_seed,
               'previous_comment_cnt': args.previous_comment_cnt,
+              'min_comment_cnt': args.min_comment_cnt,
               'max_seq_len': args.max_seq_len,
               'prob_to_full': args.prob_to_full,
               'sentiment_fingerprinting': args.sentiment_fingerprinting,
@@ -83,6 +84,7 @@ def main():
                         batch_size=config['batch_size'],
                         max_seq_len=config['max_seq_len'],
                         previous_comment_cnt=config['previous_comment_cnt'],
+                        min_comment_cnt=config['min_comment_cnt'],
                         target_sentiment=config['sentiment_fingerprinting'],
                         target_emotion=config['emotion_fingerprinting'])
         config['author_size'] = len(io.authors)

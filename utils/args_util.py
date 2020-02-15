@@ -16,6 +16,7 @@ def add_general_args(args=None):
     args.add_argument('--gpu_id', type=int, default=0)
     args.add_argument('--root_folder', type=str, default='D:/data/outlets')
     args.add_argument('--previous_comment_cnt', type=int, default=12)
+    args.add_argument('--min_comment_cnt', type=int, default=14)
     args.add_argument('--max_seq_len', type=int, default=128)
     args.add_argument('--prob_to_full', type=float, default=1.)
     args.add_argument('--embedding_weight', default='d:/data/embedding/en.wiki.bpe.vs25000.d300.w2v.txt')
