@@ -51,7 +51,7 @@ class Pipeline(object):
 
     def run(self):
         for e in range(self.epoch):
-            if self.config['use_entire_example_epoch'] > 3:
+            if self.config['use_entire_example_epoch'] > e:
                 train_examples = self.data_io.build_entire_examples()
             else:
                 train_examples = self.data_io.build_examples(1.0, split='train')
