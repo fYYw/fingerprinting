@@ -19,7 +19,8 @@ class Pipeline(object):
                  config,
                  device):
         self.data_io = data_io
-        self.high_dev_examples, self.low_dev_examples = data_io.build_split_examples('dev')
+        self.high_dev_examples, self.low_dev_examples = data_io.build_split_examples(
+            'dev', min_count=self.config['previous_comment_cnt'])
         self.high_dev_iter = data_io.build_iter_idx(self.high_dev_examples)
         self.low_dev_iter = data_io.build_iter_idx(self.low_dev_examples)
         self.test_examples = data_io.build_examples(1., 'test')
