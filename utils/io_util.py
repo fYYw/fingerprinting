@@ -140,9 +140,10 @@ def sample_records(author_dict, previous_cnt=6, min_cnt=-1, split='train'):
     return examples
 
 
-def pad_and_mask(single_example, max_len, pad_idx):
+def pad_and_mask(single_example, max_len, pad_idx=-1):
     if len(single_example) < max_len:
-        example = single_example + [single_example[-1] for _ in range(max_len - len(single_example))]
+        example = single_example + [pad_idx if pad_idx > -1 else single_example[-1]
+                                    for _ in range(max_len - len(single_example))]
         mask = [1 for _ in range(len(single_example))] + [0 for _ in range(max_len - len(single_example))]
     else:
         example = single_example[:max_len]
@@ -310,11 +311,11 @@ class IO(object):
             emotions.append(emotion)
         read_tracks = pad_seq_seq(read_tracks, pad_idx=0, max_word_seq=self.max_seq_len, max_track_seq=-1)
         write_tracks = pad_seq_seq(write_tracks, pad_idx=0, max_word_seq=self.max_seq_len, max_track_seq=-1)
-        vaders = pad_seq(vaders, 0, max_word_seq=-1)
-        flairs = pad_seq(flairs, 0, max_word_seq=-1)
-        sents = pad_seq(sents, 0, max_word_seq=-1)
-        subjs = pad_seq(subjs, 0, max_word_seq=-1)
-        emotions = pad_seq(emotions, 0, max_word_seq=-1)
+        vaders = pad_seq(vaders, -1, max_word_seq=-1)
+        flairs = pad_seq(flairs, -1, max_word_seq=-1)
+        sents = pad_seq(sents, -1, max_word_seq=-1)
+        subjs = pad_seq(subjs, -1, max_word_seq=-1)
+        emotions = pad_seq(emotions, -1, max_word_seq=-1)
         return author, read_tracks, write_tracks, (vaders, flairs, sents, subjs), emotions
 
     def topic_classification_input(self, batch_idx, examples):
