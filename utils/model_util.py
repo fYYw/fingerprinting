@@ -199,6 +199,8 @@ class Model(nn.Module):
         if track is not None:
             outputs = outputs[track]
             h_t = h_t.index_select(1, track).transpose(0, 1).contiguous()
+        else:
+            h_t = h_t.transpose(0, 1).contiguous()
         return outputs, h_t.view(batch_size, -1)
 
     def build_embedding(self, vocab=None, embedding=None):
