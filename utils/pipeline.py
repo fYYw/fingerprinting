@@ -39,18 +39,20 @@ class Pipeline(object):
 
         self.epoch = epoch
         self.global_step = 0
-        self.train_log = "Epoch {0} Prog {1:.1f}% || v_tar: {2:.3f} || f_tar: {3:.3f} || s_tar: {4:.3f} " \
-                         "|| b_tar: {5:.3f} || e_tar: {6:.3f} || Author: {7:.3f} || t_track: {8:.3f} || " \
-                         "v_track: {9:.3f} || f_track: {10:.3f} || s_track: {11:.3f} || b_track: {12:.3f} || " \
+        self.train_log = "Epoch {0} Prog {1:.1f}% || Author: {2:.3f} || topic: {3:.3f} || v_tar: {4:.3f} " \
+                         "|| v_track: {5:.3f} || f_tar: {6:.3f} || f_track: {7:.3f} || s_tar: {8:.3f} || " \
+                         "s_track: {9:.3f} || b_tar: {10:.3f} || b_track: {11:.3f} || e_tar: {12:.3f} || " \
                          "e_track: {13:.3f} . "
-        self.train_loss = {'author': [], 'v_pf': [], 'f_pf': [], 's_pf': [], 'b_pf': [], 'e_pf': [],
-                           't_ax': [], 'v_ax': [], 'f_ax': [], 's_ax': [], 'b_ax': [], 'e_ax': []}
+        self.train_loss = {'author': [0], 'v_pf': [0], 'f_pf': [0], 's_pf': [0], 'b_pf': [0], 'e_pf': [0],
+                           't_ax': [0], 'v_ax': [0], 'f_ax': [0], 's_ax': [0], 'b_ax': [0], 'e_ax': [0]}
 
         self.dev_perf = {'vader': 0, 'flair': 0, 'sent': 0, 'subj': 0,
                          'emotion': 0, 'mean': 0}
         self.test_perf = {'vader': 0, 'flair': 0, 'sent': 0, 'subj': 0,
                           'emotion': 0, 'mean': 0}
         self.train_procedure = []
+
+        self.y_freq = {}
 
     def get_fp_loss(self, fp_result, fp_batch, loss_dict):
         loss = 0
@@ -60,34 +62,60 @@ class Pipeline(object):
             loss += 0.1 * author_loss
             loss_dict['author'].append(author_loss.item())
 
-        if self.config['sentiment_fingerprinting']:
-            vader_loss = F.cross_entropy(fp_result['vader'],
-                                         torch.tensor(fp_batch['v_tar'], device=self.device))
-            loss += vader_loss
+        if self.config['vader']:
+            v_tar = torch.tensor(fp_batch['v_tar'], device=self.device)
+            v_even_idx = get_even_class(v_tar, device=self.device)
+            if v_even_idx is not None:
+                vader_loss = F.cross_entropy(fp_result['vader'].index_select(0, v_even_idx),
+                                             v_tar.index_select(0, v_even_idx))
+            else:
+                vader_loss = 0
+            loss += 1.5 * vader_loss
             loss_dict['v_pf'].append(vader_loss.item())
-
-            flair_loss = F.cross_entropy(fp_result['flair'],
-                                         torch.tensor(fp_batch['f_tar'], device=self.device))
+        if self.config['flair']:
+            f_tar = torch.tensor(fp_batch['f_tar'], device=self.device)
+            f_even_idx = get_even_class(f_tar, device=self.device)
+            if f_even_idx is not None:
+                flair_loss = F.cross_entropy(fp_result['flair'].index_select(0, f_even_idx),
+                                             f_tar.index_select(0, f_even_idx))
+            else:
+                flair_loss = 0
             loss += flair_loss
             loss_dict['f_pf'].append(flair_loss.item())
-
-            sent_loss = F.cross_entropy(fp_result['sent'],
-                                        torch.tensor(fp_batch['s_tar'], device=self.device))
+        if self.config['sent']:
+            s_tar = torch.tensor(fp_batch['s_tar'], device=self.device)
+            s_even_idx = get_even_class(s_tar, device=self.device)
+            if s_even_idx is not None:
+                sent_loss = F.cross_entropy(fp_result['sent'].index_select(0, s_even_idx),
+                                            s_tar.index_select(0, s_even_idx))
+            else:
+                sent_loss = 0
             loss += sent_loss
             loss_dict['s_pf'].append(sent_loss.item())
-
-            subj_loss = F.cross_entropy(fp_result['subj'],
-                                        torch.tensor(fp_batch['b_tar'], device=self.device))
+        if self.config['subj']:
+            b_tar = torch.tensor(fp_batch['b_tar'], device=self.device)
+            b_even_idx = get_even_class(b_tar, device=self.device)
+            if b_even_idx is not None:
+                subj_loss = F.cross_entropy(fp_result['subj'].index_select(0, b_even_idx),
+                                            b_tar.index_select(0, b_even_idx))
+            else:
+                subj_loss = 0
             loss += subj_loss
             loss_dict['b_pf'].append(subj_loss.item())
 
-        if self.config['emotion_fingerprinting']:
-            emotion_loss = F.binary_cross_entropy_with_logits(fp_result['emotion'],
-                                                              torch.tensor(fp_batch['e_tar'],
-                                                                           device=self.device,
-                                                                           dtype=torch.float))
-            loss += emotion_loss
-            loss_dict['e_pf'].append(emotion_loss.item())
+        if self.config['emotion']:
+            loss_per_dim = []
+            e_tar = torch.tensor(fp_batch['e_tar'], device=self.device, dtype=torch.float)
+            for dim_ in [0, 1, 2, 3, 4, 5]:
+                pred = fp_result['emotion'][:, dim_]
+                e_even_idx = get_even_class(e_tar[:, dim_], device=self.device)
+                if e_even_idx is not None:
+                    tmp_e_loss = F.binary_cross_entropy_with_logits(pred.index_select(0, e_even_idx),
+                                                                    e_tar[:, dim_].index_select(0, e_even_idx))
+                    loss_per_dim.append(tmp_e_loss)
+            e_v_loss = sum(loss_per_dim) / len(loss_per_dim)
+            loss += e_v_loss
+            loss_dict['e_pf'].append(e_v_loss.item())
         return loss
 
     def get_aux_loss(self, batch_idx, examples, loss_dict):
@@ -104,40 +132,59 @@ class Pipeline(object):
             loss_dict['t_ax'].append(topic_loss.item())
 
         aux_targets = []
-        if self.config['build_sentiment_predict']:
-            aux_targets.extend(['vader', 'flair', 'sent', 'subj'])
-        if self.config['build_emotion_predict']:
+        if self.config['vader']:
+            aux_targets.append('vader')
+        if self.config['flair']:
+            aux_targets.append('flair')
+        if self.config['sent']:
+            aux_targets.append('sent')
+        if self.config['subj']:
+            aux_targets.append('subj')
+        if self.config['emotion']:
             aux_targets.append('emotion')
         if len(aux_targets) > 0:
             result = self.model(is_auxiliary=True,
                                 x=a_batch['comment'],
                                 target=aux_targets, device=self.device)
-            if self.config['build_sentiment_predict']:
-                a_v_loss = F.cross_entropy(result['vader'],
-                                           torch.tensor(a_batch['v_tar'], device=self.device))
+            if self.config['vader']:
+                v_tar = torch.tensor(a_batch['v_tar'], device=self.device)
+                v_even_idx = get_even_class(v_tar, device=self.device)
+                a_v_loss = F.cross_entropy(result['vader'].index_select(0, v_even_idx),
+                                           v_tar.index_select(0, v_even_idx))
                 loss += a_v_loss
                 loss_dict['v_ax'].append(a_v_loss.item())
-
-                f_v_loss = F.cross_entropy(result['flair'],
-                                           torch.tensor(a_batch['f_tar'], device=self.device))
+            if self.config['flair']:
+                f_tar = torch.tensor(a_batch['f_tar'], device=self.device)
+                f_even_idx = get_even_class(f_tar, device=self.device)
+                f_v_loss = F.cross_entropy(result['flair'].index_select(0, f_even_idx),
+                                           f_tar.index_select(0, f_even_idx))
                 loss += f_v_loss
                 loss_dict['f_ax'].append(f_v_loss.item())
-
-                s_v_loss = F.cross_entropy(result['sent'],
-                                           torch.tensor(a_batch['s_tar'], device=self.device))
+            if self.config['sent']:
+                s_tar = torch.tensor(a_batch['s_tar'], device=self.device)
+                s_even_idx = get_even_class(s_tar, device=self.device)
+                s_v_loss = F.cross_entropy(result['sent'].index_select(0, s_even_idx),
+                                           s_tar.index_select(0, s_even_idx))
                 loss += s_v_loss
                 loss_dict['s_ax'].append(s_v_loss.item())
-
-                b_v_loss = F.cross_entropy(result['subj'],
-                                           torch.tensor(a_batch['b_tar'], device=self.device))
+            if self.config['subj']:
+                b_tar = torch.tensor(a_batch['b_tar'], device=self.device)
+                b_even_idx = get_even_class(b_tar, device=self.device)
+                b_v_loss = F.cross_entropy(result['subj'].index_select(0, b_even_idx),
+                                           b_tar.index_select(0, b_even_idx))
                 loss += b_v_loss
                 loss_dict['b_ax'].append(b_v_loss.item())
 
-            if self.config['build_emotion_predict']:
-                e_v_loss = F.binary_cross_entropy_with_logits(result['emotion'],
-                                                              torch.tensor(a_batch['e_tar'],
-                                                                           device=self.device,
-                                                                           dtype=torch.float))
+            if self.config['emotion']:
+                loss_per_dim = []
+                e_tar = torch.tensor(a_batch['e_tar'], device=self.device, dtype=torch.float)
+                for dim_ in [0, 1, 2, 3, 4, 5]:
+                    pred = result['emotion'][:, dim_]
+                    e_even_idx = get_even_class(e_tar[:, dim_], device=self.device)
+                    tmp_e_loss = F.binary_cross_entropy_with_logits(pred.index_select(0, e_even_idx),
+                                                                    e_tar[:, dim_].index_select(0, e_even_idx))
+                    loss_per_dim.append(tmp_e_loss)
+                e_v_loss = sum(loss_per_dim) / 6.
                 loss += e_v_loss
                 loss_dict['e_ax'].append(e_v_loss.item())
         return loss
@@ -164,6 +211,10 @@ class Pipeline(object):
             train_examples = self.data_io.build_train_examples(pre_cnt=self.config['previous_comment_cnt'],
                                                                min_cnt=self.config['min_comment_cnt'])
             train_iter = self.data_io.build_iter_idx(train_examples, True)
+            if not self.y_freq:
+                for key, value in self.data_io.y_frequency.items():
+                    self.y_freq[key] = torch.tensor(value, device=self.device, dtype=torch.float)
+
             for i, batch_idx in enumerate(train_iter):
                 if self.config['free_fp'] < self.global_step:
                     fp_batch, fp_result = self.get_result(batch_idx, train_examples)
@@ -191,17 +242,17 @@ class Pipeline(object):
                                        * self.config['update_iter']) == 0:
                     train_log = self.train_log.format(
                         e, 100.0 * i / len(train_iter),
-                        np.mean(self.train_loss['v_pf'][-self.config['check_step']:]),
-                        np.mean(self.train_loss['f_pf'][-self.config['check_step']:]),
-                        np.mean(self.train_loss['s_pf'][-self.config['check_step']:]),
-                        np.mean(self.train_loss['b_pf'][-self.config['check_step']:]),
-                        np.mean(self.train_loss['e_pf'][-self.config['check_step']:]),
                         np.mean(self.train_loss['author'][-self.config['check_step']:]),
                         np.mean(self.train_loss['t_ax'][-self.config['check_step']:]),
+                        np.mean(self.train_loss['v_pf'][-self.config['check_step']:]),
                         np.mean(self.train_loss['v_ax'][-self.config['check_step']:]),
+                        np.mean(self.train_loss['f_pf'][-self.config['check_step']:]),
                         np.mean(self.train_loss['f_ax'][-self.config['check_step']:]),
+                        np.mean(self.train_loss['s_pf'][-self.config['check_step']:]),
                         np.mean(self.train_loss['s_ax'][-self.config['check_step']:]),
+                        np.mean(self.train_loss['b_pf'][-self.config['check_step']:]),
                         np.mean(self.train_loss['b_ax'][-self.config['check_step']:]),
+                        np.mean(self.train_loss['e_pf'][-self.config['check_step']:]),
                         np.mean(self.train_loss['e_ax'][-self.config['check_step']:]))
                     print(train_log)
                     self.train_procedure.append(train_log)
@@ -232,22 +283,22 @@ class Pipeline(object):
             print('LOw DEV: ', low_dev_perf)
             print('BEST TEST: ', self.test_perf)
             # if self.config['check_grad']:
-                # plt.bar(np.arange(len(grad_dict['max'])), grad_dict['max'], alpha=0.1, lw=1, color="c")
-                # plt.bar(np.arange(len(grad_dict['max'])), grad_dict['ave'], alpha=0.1, lw=1, color="b")
-                # plt.hlines(0, 0, len(grad_dict['ave']) + 1, lw=2, color="k")
-                # plt.xticks(range(0, len(grad_dict['ave']), 1), grad_dict['layer'], rotation="vertical")
-                # plt.xlim(left=0, right=len(grad_dict['ave']))
-                # plt.ylim(bottom=-0.001, top=0.02)  # zoom in on the lower gradient regions
-                # plt.xlabel("Layers")
-                # plt.ylabel("average gradient")
-                # plt.title("Gradient flow")
-                # plt.grid(True)
-                # plt.legend([Line2D([0], [0], color="c", lw=4),
-                #             Line2D([0], [0], color="b", lw=4),
-                #             Line2D([0], [0], color="k", lw=4)], ['max-gradient', 'mean-gradient', 'zero-gradient'])
-                # saved_path = os.path.join(self.config['root_folder'], self.config['outlet'], 'grad_stat.png')
-                # plt.savefig(saved_path)
-                # plt.clf()
+            # plt.bar(np.arange(len(grad_dict['max'])), grad_dict['max'], alpha=0.1, lw=1, color="c")
+            # plt.bar(np.arange(len(grad_dict['max'])), grad_dict['ave'], alpha=0.1, lw=1, color="b")
+            # plt.hlines(0, 0, len(grad_dict['ave']) + 1, lw=2, color="k")
+            # plt.xticks(range(0, len(grad_dict['ave']), 1), grad_dict['layer'], rotation="vertical")
+            # plt.xlim(left=0, right=len(grad_dict['ave']))
+            # plt.ylim(bottom=-0.001, top=0.02)  # zoom in on the lower gradient regions
+            # plt.xlabel("Layers")
+            # plt.ylabel("average gradient")
+            # plt.title("Gradient flow")
+            # plt.grid(True)
+            # plt.legend([Line2D([0], [0], color="c", lw=4),
+            #             Line2D([0], [0], color="b", lw=4),
+            #             Line2D([0], [0], color="k", lw=4)], ['max-gradient', 'mean-gradient', 'zero-gradient'])
+            # saved_path = os.path.join(self.config['root_folder'], self.config['outlet'], 'grad_stat.png')
+            # plt.savefig(saved_path)
+            # plt.clf()
 
         json.dump(self.train_loss, open(os.path.join(
             self.config['root_folder'], self.config['outlet'], 'train_loss.json'), 'w'))
@@ -263,30 +314,34 @@ class Pipeline(object):
         acc = {'vader': 0, 'flair': 0, 'sent': 0, 'subj': 0,
                'emotion': 0, 'mean': 0}
         self.model.eval()
+        targets = []
         for i, batch_idx in enumerate(data_iter):
             fp_batch, fp_result = self.get_result(batch_idx, examples)
 
             for j, a in enumerate(fp_batch['author']):
                 pred_record = {'vader': [0, 0], 'flair': [0, 0], 'sent': [0, 0], 'subj': [0, 0],
                                'emotion': [0, 0]}
-                if self.config['sentiment_fingerprinting']:
+                if self.config['vader']:
                     pred_record['vader'][0] = fp_result['vader'][j].argmax().item()
                     pred_record['vader'][1] = fp_batch['v_tar'][j]
                     tmp_cnt['vader'][int(pred_record['vader'][0] == pred_record['vader'][1])] += 1
-
+                    targets.append('vader')
+                if self.config['flair']:
                     pred_record['flair'][0] = fp_result['flair'][j].argmax().item()
                     pred_record['flair'][1] = fp_batch['f_tar'][j]
                     tmp_cnt['flair'][int(pred_record['flair'][0] == pred_record['flair'][1])] += 1
-
+                    targets.append('flair')
+                if self.config['sent']:
                     pred_record['sent'][0] = fp_result['sent'][j].argmax().item()
                     pred_record['sent'][1] = fp_batch['s_tar'][j]
                     tmp_cnt['sent'][int(pred_record['sent'][0] == pred_record['sent'][1])] += 1
-
+                    targets.append('sent')
+                if self.config['subj']:
                     pred_record['subj'][0] = fp_result['subj'][j].argmax().item()
                     pred_record['subj'][1] = fp_batch['b_tar'][j]
                     tmp_cnt['subj'][int(pred_record['subj'][0] == pred_record['subj'][1])] += 1
-
-                if self.config['emotion_fingerprinting']:
+                    targets.append('subj')
+                if self.config['emotion']:
                     pred_emo = [int(i > 0) for i in fp_result['emotion'][j].detach().tolist()]
                     pred_record['emotion'][0] = pred_emo
                     pred_record['emotion'][1] = fp_batch['e_tar'][j]
@@ -295,11 +350,10 @@ class Pipeline(object):
                 pred_records.append(pred_record)
         self.model.train()
         tmp_acc_sum = []
-        if self.config['sentiment_fingerprinting']:
-            for key in ['vader', 'flair', 'sent', 'subj']:
-                acc[key] = 1.0 * tmp_cnt[key][1] / (tmp_cnt[key][0] + tmp_cnt[key][1])
-                tmp_acc_sum.append(acc[key])
-        if self.config['emotion_fingerprinting']:
+        for key in targets:
+            acc[key] = 1.0 * tmp_cnt[key][1] / (tmp_cnt[key][0] + tmp_cnt[key][1])
+            tmp_acc_sum.append(acc[key])
+        if self.config['emotion']:
             acc['emotion'] = 1.0 * tmp_cnt['emotion'][0] / (tmp_cnt['emotion'][0] + tmp_cnt['emotion'][1])
             tmp_acc_sum.append(acc['emotion'])
         acc['mean'] = sum(tmp_acc_sum) / len(tmp_acc_sum)
@@ -321,6 +375,52 @@ def track_grad(named_parameters, layers, ave_grads, max_grads):
     # plt.ylabel("average gradient")
     # plt.title("Gradient flow")
     # plt.grid(True)
+
+
+def get_even_class(tar, device):
+    zero_idx = tar.eq(0).nonzero().view(-1)
+    one_idx = tar.eq(1).nonzero().view(-1)
+    two_idx = tar.eq(2).nonzero().view(-1)
+    size_ = []
+    if zero_idx.size(0) > 0 and zero_idx.size(0) > (tar.size(0) // 10):
+        size_.append(zero_idx.size(0))
+    if one_idx.size(0) > 0 and one_idx.size(0) > (tar.size(0) // 10):
+        size_.append(one_idx.size(0))
+    if two_idx.size(0) > 0 and two_idx.size(0) > (tar.size(0) // 10):
+        size_.append(two_idx.size(0))
+
+    if len(size_) > 1:
+        min_size = min(size_)
+    else:
+        if zero_idx.size(0) > 0:
+            size_.append(zero_idx.size(0))
+        if one_idx.size(0) > 0:
+            size_.append(one_idx.size(0))
+        if two_idx.size(0) > 0:
+            size_.append(two_idx.size(0))
+        min_size = min(size_)
+
+        if min_size == max(size_):
+            return None
+
+    result_idx = []
+    if zero_idx.size(0) > 0:
+        zero_perm = torch.randperm(zero_idx.size(0))
+        perm_zero_idx = zero_idx[zero_perm][: min_size]
+        result_idx.append(perm_zero_idx)
+    if one_idx.size(0) > 0:
+        one_perm = torch.randperm(one_idx.size(0))
+        perm_one_idx = one_idx[one_perm][: min_size]
+        result_idx.append(perm_one_idx)
+    if two_idx.size(0) > 0:
+        two_perm = torch.randperm(two_idx.size(0))
+        perm_two_idx = two_idx[two_perm][: min_size]
+        result_idx.append(perm_two_idx)
+
+    if len(result_idx) > 1:
+        return torch.cat(result_idx).to(device)
+    else:
+        return result_idx[0].to(device)
 
 
 if __name__ == '__main__':

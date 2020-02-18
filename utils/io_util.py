@@ -169,6 +169,13 @@ class IO(object):
         self.min_comment_cnt = min_comment_cnt
         self.max_seq_len = max_seq_len
 
+        self.y_update = False
+        self.y_frequency = {'vader': np.zeros((3,), dtype=float),
+                            'flair': np.zeros((3, ), dtype=float),
+                            'sent': np.zeros((3, ), dtype=float),
+                            'subj': np.zeros((3, ), dtype=float),
+                            'emotion': np.zeros((6, 2), dtype=float)}
+
     def load_vocab(self, folder):
         for line in open(os.path.join(folder, 'vocab.token'), encoding='utf-8'):
             key, idx = line.strip().split('\t')
@@ -187,9 +194,29 @@ class IO(object):
             tmp_track = track[: -2]
             if len(tmp_track) < min_cnt:
                 continue
-            for i in range(1, len(tmp_track)):
-                examples[example_id] = (author, tmp_track[i], tmp_track[max(-pre_cnt + i, 0): i])
-                example_id += 1
+            for i, cid in enumerate(tmp_track):
+                if not self.y_update:
+                    comment = self.comments[cid]
+                    self.y_frequency['vader'][comment['sentiment']['vader']] += 1
+                    self.y_frequency['flair'][comment['sentiment']['flair']] += 1
+                    self.y_frequency['sent'][comment['sentiment']['blob_sentiment']] += 1
+                    self.y_frequency['subj'][comment['sentiment']['blob_subjective']] += 1
+                    for j, v in enumerate(comment['emotion']):
+                        self.y_frequency['emotion'][j][v] += 1
+                if i > 0:
+                    examples[example_id] = (author, tmp_track[i], tmp_track[max(-pre_cnt + i, 0): i])
+                    example_id += 1
+        if not self.y_update:
+            for key, value in self.y_frequency.items():
+                if key == 'emotion':
+                    tmp_value = value[:, 0] / value[:, 1]
+                    self.y_frequency[key] = tmp_value
+                else:
+                    tmp_value = value.sum() / value
+                    tmp_value = np.nan_to_num(tmp_value, nan=0, posinf=0, neginf=0)
+                    tmp_value /= np.min(tmp_value[tmp_value.nonzero()])
+                    self.y_frequency[key] = tmp_value
+            self.y_update = True
         return examples
 
     def build_eval_examples(self, pre_cnt, min_cnt, split='dev'):

@@ -65,8 +65,6 @@ def main():
               'previous_comment_cnt': args.previous_comment_cnt,
               'min_comment_cnt': args.min_comment_cnt,
               'max_seq_len': args.max_seq_len,
-              'sentiment_fingerprinting': args.sentiment_fingerprinting,
-              'emotion_fingerprinting': args.emotion_fingerprinting,
               'build_auxiliary_task': args.build_auxiliary_task,
               'detach_article': args.detach_article,
               'track_max_pool': args.track_max_pool,
@@ -77,7 +75,12 @@ def main():
               'token_last_pool': args.token_last_pool,
               'free_fp': args.free_fp,
               'freeze_aux': args.freeze_aux,
-              'track_grad': args.track_grad
+              'track_grad': args.track_grad,
+              'vader': args.vader,
+              'flair': args.flair,
+              'sent': args.sent,
+              'subj': args.subj,
+              'emotion': args.emotion,
               }
     for key, value in config.items():
         print(key, value)
@@ -95,8 +98,8 @@ def main():
                         max_seq_len=config['max_seq_len'],
                         previous_comment_cnt=config['previous_comment_cnt'],
                         min_comment_cnt=config['min_comment_cnt'],
-                        target_sentiment=config['sentiment_fingerprinting'],
-                        target_emotion=config['emotion_fingerprinting'])
+                        target_sentiment=True,
+                        target_emotion=config['emotion'])
         config['author_size'] = len(io.authors)
         config['topic_size'] = io.topic_size
         config['token_size'] = len(io.word2idx)
