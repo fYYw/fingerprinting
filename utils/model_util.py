@@ -23,8 +23,8 @@ class Model(nn.Module):
             author_final_dim += config['author_dim']
         if config['build_author_track']:
             input_size = 2 * config['hid_dim'] * (int(config['token_max_pool']) +
-                                                  int(config['token_mean_pool']) +
-                                                  int(config['token_last_pool']))
+                                                  int(config['token_mean_pool']))
+            input_size += config['hid_dim'] * int(config['token_last_pool'])
             if config['build_sentiment_embedding']:
                 self.vader_embed = nn.Embedding(3, config['sentiment_dim'])
                 self.flair_embed = nn.Embedding(3, config['sentiment_dim'])
@@ -48,10 +48,9 @@ class Model(nn.Module):
             self.author_predict = nn.Linear(author_final_dim, config['author_size'])
 
         self.author_article_merge = nn.Sequential(
-            nn.Linear(author_final_dim +
+            nn.Linear(author_final_dim + (config['hid_dim'] // 2) * int(config['token_last_pool']) +
                       config['hid_dim'] * (int(config['token_max_pool']) +
-                                           int(config['token_mean_pool']) +
-                                           int(config['token_last_pool'])),
+                                           int(config['token_mean_pool'])),
                       config['hid_dim'] * 2),
             nn.SELU(),
             nn.Linear(config['hid_dim'] * 2, config['hid_dim'] * 2),
@@ -68,28 +67,26 @@ class Model(nn.Module):
 
         if config['build_topic_predict']:
             self.topic_predict = nn.Linear(config['hid_dim'] * (int(config['token_max_pool']) +
-                                                                int(config['token_mean_pool']) +
-                                                                int(config['token_last_pool'])),
+                                                                int(config['token_mean_pool'])) +
+                                           (config['hid_dim'] // 2) * int(config['token_last_pool']),
                                            config['topic_size'])
         if config['build_sentiment_predict']:
             self.vader_predict = nn.Linear(config['hid_dim'] * (int(config['token_max_pool']) +
-                                                                int(config['token_mean_pool']) +
-                                                                int(config['token_last_pool'])),
-                                           3)
+                                                                int(config['token_mean_pool'])) +
+                                           (config['hid_dim'] // 2) * int(config['token_last_pool']), 3)
             self.flair_predict = nn.Linear(config['hid_dim'] * (int(config['token_max_pool']) +
-                                                                int(config['token_mean_pool']) +
-                                                                int(config['token_last_pool'])),
-                                           3)
+                                                                int(config['token_mean_pool'])) +
+                                           (config['hid_dim'] // 2) * int(config['token_last_pool']), 3)
             self.sent_predict = nn.Linear(config['hid_dim'] * (int(config['token_max_pool']) +
-                                                               int(config['token_mean_pool']) +
-                                                               int(config['token_last_pool'])),
-                                          3)
+                                                               int(config['token_mean_pool'])) +
+                                          (config['hid_dim'] // 2) * int(config['token_last_pool']), 3)
             self.subj_predict = nn.Linear(config['hid_dim'] * (int(config['token_max_pool']) +
-                                                               int(config['token_mean_pool']) +
-                                                               int(config['token_last_pool'])),
-                                          3)
+                                                               int(config['token_mean_pool'])) +
+                                          (config['hid_dim'] // 2) * int(config['token_last_pool']), 3)
         if config['build_emotion_predict']:
-            self.emotion_predict = nn.Linear(config['hid_dim'], 6)
+            self.emotion_predict = nn.Linear(config['hid_dim'] * (int(config['token_max_pool']) +
+                                                                  int(config['token_mean_pool'])) +
+                                             (config['hid_dim'] // 2) * int(config['token_last_pool']), 6)
 
         self.config = config
 
@@ -120,18 +117,19 @@ class Model(nn.Module):
         x_in = pack(x, token_len, batch_first=True, enforce_sorted=False)
         outputs, h_t = rnn(x_in)
         outputs, out_len = unpack(outputs, batch_first=True)
-        assert (out_len - token_len).sum() == 0
 
         if isinstance(h_t, tuple):
             h_t = h_t[0]
-        h_t = h_t.transpose(0, 1).contiguous()  # batch, layer, hid
+        h_t = h_t.transpose(0, 1).contiguous()  # batch, layer * num_direction, hid
 
         pooled = []
         if max_pool:
-            tmp_output = outputs.masked_fill(mask, -float('inf')).max(1)  # batch, hid
-            pooled.append(tmp_output)
+            tmp_output = outputs.masked_fill(mask.unsqueeze(-1).expand(-1, -1, outputs.size(-1)).eq(0),
+                                             -float('inf'))  # batch, hid
+            pooled.append(torch.max(tmp_output, dim=1)[0])
         if mean_pool:
-            tmp_output = outputs.masked_fill(mask, 0).sum(1) / token_len  # batch, hid
+            tmp_output = outputs.masked_fill(mask.unsqueeze(-1).expand(-1, -1, outputs.size(-1)).eq(0),
+                                             0).sum(1) / token_len.unsqueeze(-1)  # batch, hid
             pooled.append(tmp_output)
         if last_pool:
             tmp_output = h_t.mean(1)  # batch, hid
@@ -142,7 +140,7 @@ class Model(nn.Module):
         else:
             pooled_result = pooled[0]
         if tensor:
-            return pooled_result.view(batch_size, x.size(1), -1)
+            return pooled_result.view(batch_size, seq_len, -1)
         else:
             return pooled_result
 
@@ -185,7 +183,7 @@ class Model(nn.Module):
                                      max_pool=self.config['token_max_pool'],
                                      mean_pool=self.config['token_mean_pool'],
                                      last_pool=self.config['token_last_pool'])
-            if self.config['detach_track']:
+            if self.config['detach_article']:
                 tracks = [reads.detach(), writes.detach()]
             else:
                 tracks = [reads, writes]
@@ -226,42 +224,45 @@ class Model(nn.Module):
             result['subj'] = self.subj(final_rep)
 
         if self.config['emotion_fingerprinting']:
-            result['emotion'] = self.emotion_predict(final_rep)
+            result['emotion'] = self.emotion(final_rep)
 
         return result
 
-    def predict_topic(self, articles, device):
+    def auxiliary_predict(self, x, target, device):
         """
-        :param articles: (batch, token_len) * 2
-        :param device: torch.device
-        :return:
-        """
-        articles = [torch.tensor(r, device=device) for r in articles]
-        article_target = self.rnn_encode(self.token_encoder,
-                                         self.token_embedding(articles[0]), articles[1],
-                                         max_pool=self.config['token_max_pool'],
-                                         mean_pool=self.config['token_mean_pool'],
-                                         last_pool=self.config['token_last_pool'])
-        return self.topic_predict(article_target)
-
-    def predict_sentiment_emotion(self, comments, device):
-        """
-        :param comments: (batch, token_len) * 2
+        :param x: articles: (batch, token_len) * 2
+        :param target: str
         :param device: torch.device
         :return:
         """
         result = {}
-        comments = [torch.tensor(r, device=device) for r in comments]
-        comment_target = self.rnn_encode(self.token_encoder,
-                                         self.token_embedding(comments[0]), comments[1],
-                                         max_pool=self.config['token_max_pool'],
-                                         mean_pool=self.config['token_mean_pool'],
-                                         last_pool=self.config['token_last_pool'])
-        if self.config['build_sentiment_predict']:
-            pass
+        x = [torch.tensor(r, device=device) for r in x]
+        embeds = self.rnn_encode(self.token_encoder,
+                                 self.token_embedding(x[0]), x[1],
+                                 max_pool=self.config['token_max_pool'],
+                                 mean_pool=self.config['token_mean_pool'],
+                                 last_pool=self.config['token_last_pool'])
+        if 'vader' in target:
+            result['vader'] = self.vader_predict(embeds)
+        if 'flair' in target:
+            result['flair'] = self.flair_predict(embeds)
+        if 'sent' in target:
+            result['sent'] = self.sent_predict(embeds)
+        if 'subj' in target:
+            result['subj'] = self.subj_predict(embeds)
+        if 'emotion' in target:
+            result['emotion'] = self.emotion_predict(embeds)
+        if 'topic' in target:
+            result['topic'] = self.topic_predict(embeds)
+        return result
 
-        if self.config['build_emotion_predict']:
-            pass
+    def forward(self, is_auxiliary, **kwargs):
+        if is_auxiliary:
+            return self.auxiliary_predict(kwargs['x'], kwargs['target'], kwargs['device'])
+        else:
+            return self.fingerprint(kwargs['author'], kwargs['read_target'],
+                                    kwargs['read_track'], kwargs['write_track'],
+                                    kwargs['sentiment_track'], kwargs['emotion_track'], kwargs['device'])
 
 
 def sort_tensor_len(lengths):

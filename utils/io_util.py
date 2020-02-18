@@ -71,78 +71,10 @@ class Vocab(object):
         self.idx2word[idx] = token
 
 
-def full_records(author_dict, previous_cnt=6, split='train'):
-    examples, example_idx = {}, 0
-    for author, history in author_dict.items():
-        if split == 'train':
-            examples[example_idx] = (author, history[-previous_cnt - 2:-2])
-        elif split == 'dev':
-            examples[example_idx] = (author, history[-previous_cnt - 1:-1])
-        else:
-            examples[example_idx] = (author, history[-previous_cnt:])
-        example_idx += 1
-    return examples
-
-
-def total_records(author_dict, previous_cnt=6):
-    examples, example_idx = {}, 0
-    for author, history in author_dict.items():
-        tmp_history = history[: -2]
-        for i in range(1, len(tmp_history)):
-            examples[example_idx] = (author, tmp_history[max(-previous_cnt + i, 0): i + 1])
-            example_idx += 1
-    return examples
-
-
-def full_records_frequency(author_dict, previous_cnt=6, min_cnt=6, split='dev'):
-    high_examples, high_idx = {}, 0
-    low_examples, low_idx = {}, 0
-
-    for author, history in author_dict.items():
-        if len(history) > min_cnt:
-            if split == 'train':
-                high_examples[high_idx] = (author, history[-previous_cnt - 2: -2])
-            elif split == 'dev':
-                high_examples[high_idx] = (author, history[-previous_cnt - 1: -1])
-            else:
-                high_examples[high_idx] = (author, history[-previous_cnt:])
-            high_idx += 1
-        else:
-            if split == 'train':
-                low_examples[low_idx] = (author, history[-previous_cnt - 2: -2])
-            elif split == 'dev':
-                low_examples[low_idx] = (author, history[-previous_cnt - 1: -1])
-            else:
-                low_examples[low_idx] = (author, history[-previous_cnt:])
-            low_idx += 1
-    return high_examples, low_examples
-
-
-def sample_records(author_dict, previous_cnt=6, min_cnt=-1, split='train'):
-    examples, example_idx = {}, 0
-    if split == 'dev' or split == 'test':
-        examples = full_records(author_dict, previous_cnt, split=split)
-    else:
-        author_cnt = [(author, len(cmts)) for author, cmts in author_dict.items() if len(cmts) > min_cnt]
-        total_cnt = sum([a[1] for a in author_cnt])
-        author_prob = [1.0 * cnt[1] / total_cnt for cnt in author_cnt]
-        sampled_author = np.random.choice(author_cnt,
-                                          size=len(author_cnt),
-                                          p=author_prob)
-        for (author, cnt) in sampled_author:
-            history = author_dict[author][1:-2]  # dont account dev and test
-            if len(history) < previous_cnt:
-                examples[example_idx] = (author, history)
-            else:
-                random_idx = np.random.choice(range(1, len(history)), size=1)[0]
-                examples[example_idx] = (author, history[max(0, random_idx - previous_cnt): random_idx + 1])
-            example_idx += 1
-    return examples
-
-
 def pad_and_mask(single_example, max_len, pad_idx):
     if len(single_example) < max_len:
-        example = single_example + [single_example[-1] for _ in range(max_len - len(single_example))]
+        example = single_example + [single_example[-1] if pad_idx < 0 else pad_idx
+                                    for _ in range(max_len - len(single_example))]
         mask = [1 for _ in range(len(single_example))] + [0 for _ in range(max_len - len(single_example))]
     else:
         example = single_example[:max_len]
@@ -249,91 +181,136 @@ class IO(object):
             random.shuffle(example_ids)
         return [example_ids[i: i + self.batch_size] for i in batch_idx]
 
-    def build_examples(self, prob_to_full, split='train'):
-        sampled_prob = np.random.choice(10, size=1)[0]
-        if sampled_prob > prob_to_full * 10:
-            print("Build samples by frequency ..")
-            return sample_records(self.authors, self.previous_cnt, split)
-        else:
-            if self.min_comment_cnt > 1:
-                print("Bulid high frequent examples ..")
-                examples, _ = full_records_frequency(self.authors, previous_cnt=self.previous_cnt,
-                                                     min_cnt=self.min_comment_cnt, split=split)
-                return examples
-            print("Bulid full examples ..")
-            return full_records(self.authors, self.previous_cnt, split)
+    def build_train_examples(self, pre_cnt, min_cnt=-1):
+        examples, example_id = {}, 0
+        for author, track in self.authors.items():
+            tmp_track = track[: -2]
+            if len(tmp_track) < min_cnt:
+                continue
+            for i in range(1, len(tmp_track)):
+                examples[example_id] = (author, tmp_track[i], tmp_track[max(-pre_cnt + i, 0): i])
+                example_id += 1
+        return examples
 
-    def build_split_examples(self, split='dev', min_count=0):
-        min_cnt = min_count if min_count > 1 else self.min_comment_cnt
-        return full_records_frequency(self.authors, previous_cnt=self.previous_cnt,
-                                      min_cnt=min_cnt, split=split)
+    def build_eval_examples(self, pre_cnt, min_cnt, split='dev'):
+        high_examples, low_examples = {}, {}
+        for author, track in self.authors.items():
+            if len(track) > min_cnt:
+                target_examples = high_examples
+            else:
+                target_examples = low_examples
+            cur_idx = len(target_examples)
+            if split == 'dev':
+                target_examples[cur_idx] = (author, track[-2], track[-pre_cnt - 2: -2])
+            elif split == 'test':
+                target_examples[cur_idx] = (author, track[-1], track[-pre_cnt - 1: -1])
+            else:
+                raise NotImplementedError()
+        return high_examples, low_examples
 
-    def build_entire_examples(self):
-        return total_records(self.authors, previous_cnt=self.previous_cnt)
+    def get_batch_auxiliary(self, batch_idx, examples):
+        batched_input = {}
+        a_uni, c_uni = set(), set()
+        article, comment = [], []
+        t_tar, v_tar, f_tar, s_tar, b_tar, e_tar = [], [], [], [], [], []
+        for idx in batch_idx:
+            for cid in examples[idx][2]:
+                if cid not in c_uni:
+                    c_uni.add(cid)
+                    comment.append(self.comments[cid]['bpe'])
+                    v_tar.append(self.comments[cid]['sentiment']['vader'])
+                    f_tar.append(self.comments[cid]['sentiment']['flair'])
+                    s_tar.append(self.comments[cid]['sentiment']['blob_sentiment'])
+                    b_tar.append(self.comments[cid]['sentiment']['blob_subjective'])
+                    e_tar.append(self.comments[cid]['emotion'])
 
-    def fingerprinting_input(self, batch_idx, examples):
-        author, read_tracks, write_tracks, emotions = [], [], [], []
-        vaders, flairs, sents, subjs = [], [], [], []
+                    aid = self.comments[cid]['aid']
+                    if aid not in a_uni:
+                        article.append(self.articles[aid]['bpe'])
+                        t_tar.append(self.articles[aid]['topic'])
+        batched_input['article'] = pad_seq(article, pad_idx=0, max_word_seq=self.max_seq_len)
+        batched_input['t_tar'] = t_tar
+        batched_input['comment'] = pad_seq(comment, pad_idx=0, max_word_seq=self.max_seq_len)
+        batched_input['v_tar'] = v_tar
+        batched_input['f_tar'] = f_tar
+        batched_input['s_tar'] = s_tar
+        batched_input['b_tar'] = b_tar
+        batched_input['e_tar'] = e_tar
+        return batched_input
+
+    def get_batch_fingerprint(self, batch_idx, examples):
+        batched_input = {}
+        author, r_tracks, w_tracks, r_target, w_target = [], [], [], [], []
+        v_tar, f_tar, s_tar, b_tar, e_tar = [], [], [], [], []
+        v_tra, f_tra, s_tra, b_tra, e_tra = [], [], [], [], []
         for idx in batch_idx:
             example = examples[idx]
+            cid_tar = example[1]
+            pid = self.comments[cid_tar]['pid']
+            aid = self.comments[cid_tar]['aid']
+            if pid and pid in self.comments:
+                r_target.append(self.comments[pid]['bpe'])
+            elif pid == 'N' or not pid:
+                r_target.append(self.articles[aid]['bpe'])
+            else:
+                continue
             author.append(int(example[0]))
-            read_track, write_track = [], []
+            w_target.append(self.comments[cid_tar]['bpe'])
+            v_tar.append(self.comments[cid_tar]['sentiment']['vader'])
+            f_tar.append(self.comments[cid_tar]['sentiment']['flair'])
+            s_tar.append(self.comments[cid_tar]['sentiment']['blob_sentiment'])
+            b_tar.append(self.comments[cid_tar]['sentiment']['blob_subjective'])
+            e_tar.append(self.comments[cid_tar]['emotion'])
+
+            r_track, w_track = [], []
             vader, flair, sent, subj, emotion = [], [], [], [], []
-            for cid in example[1]:
+            for cid in example[2]:
                 pid = self.comments[cid]['pid']
                 aid = self.comments[cid]['aid']
+                w_track.append(self.comments[cid]['bpe'])
                 if pid and pid in self.comments:
-                    read_track.append(self.comments[pid]['bpe'])
+                    r_track.append(self.comments[pid]['bpe'])
                 elif pid == 'N' or not pid:
-                    read_track.append(self.articles[aid]['bpe'])
+                    r_track.append(self.articles[aid]['bpe'])
                 elif pid and pid not in self.comments:
-                    read_track.append([2])
+                    r_track.append([2])
                 else:
                     print('Unseen PID', pid)
                     raise NotImplementedError()
-
-                write_track.append(self.comments[cid]['bpe'])
-
-                if self.target_sentiment:
-                    vader.append(self.comments[cid]['sentiment']['vader'])
-                    flair.append(self.comments[cid]['sentiment']['flair'])
-                    sent.append(self.comments[cid]['sentiment']['blob_sentiment'])
-                    subj.append(self.comments[cid]['sentiment']['blob_subjective'])
-                if self.target_emotion:
-                    emotion.append(self.comments[cid]['emotion'])
-            read_tracks.append(read_track)
-            write_tracks.append(write_track)
-            vaders.append(vader)
-            flairs.append(flair)
-            sents.append(sent)
-            subjs.append(subj)
-            emotions.append(emotion)
-        read_tracks = pad_seq_seq(read_tracks, pad_idx=0, max_word_seq=self.max_seq_len, max_track_seq=-1)
-        write_tracks = pad_seq_seq(write_tracks, pad_idx=0, max_word_seq=self.max_seq_len, max_track_seq=-1)
-        vaders = pad_seq(vaders, 0, max_word_seq=-1)
-        flairs = pad_seq(flairs, 0, max_word_seq=-1)
-        sents = pad_seq(sents, 0, max_word_seq=-1)
-        subjs = pad_seq(subjs, 0, max_word_seq=-1)
-        emotions = pad_seq(emotions, 0, max_word_seq=-1)
-        return author, read_tracks, write_tracks, (vaders, flairs, sents, subjs), emotions
-
-    def topic_classification_input(self, batch_idx, examples):
-        article, topic = [], []
-        unique_aid = set()
-        for idx in batch_idx:
-            for cid in examples[idx][1]:
-                aid = self.comments[cid]['aid']
-                if aid not in unique_aid:
-                    unique_aid.add(aid)
-                    topic.append(self.articles[aid]['topic'])
-                    article.append(self.articles[aid]['bpe'])
-        article = pad_seq(article, pad_idx=0, max_word_seq=self.max_seq_len)
-        return article, topic
+                vader.append(self.comments[cid]['sentiment']['vader'])
+                flair.append(self.comments[cid]['sentiment']['flair'])
+                sent.append(self.comments[cid]['sentiment']['blob_sentiment'])
+                subj.append(self.comments[cid]['sentiment']['blob_subjective'])
+                emotion.append(self.comments[cid]['emotion'])
+            r_tracks.append(r_track)
+            w_tracks.append(w_track)
+            v_tra.append(vader)
+            f_tra.append(flair)
+            s_tra.append(sent)
+            b_tra.append(subj)
+            e_tra.append(emotion)
+        batched_input['author'] = author
+        batched_input['r_track'] = pad_seq_seq(r_tracks, pad_idx=0,
+                                               max_word_seq=self.max_seq_len, max_track_seq=-1)
+        batched_input['w_track'] = pad_seq_seq(w_tracks, pad_idx=0,
+                                               max_word_seq=self.max_seq_len, max_track_seq=-1)
+        batched_input['v_tra'] = pad_seq(v_tra, -1, max_word_seq=-1)[0]
+        batched_input['f_tra'] = pad_seq(f_tra, -1, max_word_seq=-1)[0]
+        batched_input['s_tra'] = pad_seq(s_tra, -1, max_word_seq=-1)[0]
+        batched_input['b_tra'] = pad_seq(b_tra, -1, max_word_seq=-1)[0]
+        batched_input['e_tra'] = pad_seq(e_tra, -1, max_word_seq=-1)[0]
+        batched_input['r_target'] = pad_seq(r_target, pad_idx=0, max_word_seq=self.max_seq_len)
+        batched_input['w_target'] = pad_seq(w_target, pad_idx=0, max_word_seq=self.max_seq_len)
+        batched_input['v_tar'] = v_tar
+        batched_input['f_tar'] = f_tar
+        batched_input['s_tar'] = s_tar
+        batched_input['b_tar'] = b_tar
+        batched_input['e_tar'] = e_tar
+        return batched_input
 
 
 if __name__ == '__main__':
     io = IO(folder_path='e:/outlets/Archiveis')
-    full_records_frequency(io.authors, previous_cnt=12, frequent_group=4)
     # examples = io.build_examples(1., 'train')
     # iter_idx = io.build_iter_idx(examples, True)
     # for batch_idx in iter_idx:
