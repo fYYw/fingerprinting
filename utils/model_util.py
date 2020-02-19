@@ -101,7 +101,6 @@ class Model(nn.Module):
                                                                   int(config['token_mean_pool'])) +
                                              (config['hid_dim'] // 2) * int(config['token_last_pool']), 6)
 
-
     def build_embedding(self, vocab=None, embedding=None):
         if vocab and embedding:
             weights = np.random.normal(loc=0, scale=0.1, size=(len(vocab), self.config['token_dim'])).astype(np.float32)
@@ -231,8 +230,14 @@ class Model(nn.Module):
         if self.config['build_author_predict']:
             result['author'] = self.author_predict(author_embeds)
 
-        final_rep = self.author_article_merge(torch.cat([author_embeds.detach(),
-                                                         article_target.detach()], dim=-1))
+        if self.config['build_author_track']:
+            final_rep = self.author_article_merge(torch.cat([author_embeds.detach(),
+                                                             article_target.detach()], dim=-1))
+        elif self.config['build_author_emb'] and not self.config['build_author_track']:
+            final_rep = self.author_article_merge(torch.cat([author_embeds,
+                                                             article_target.detach()], dim=-1))
+        else:
+            raise NotImplementedError()
 
         if self.config['flair']:
             result['flair'] = self.flair(final_rep)  # batch, seq, 3

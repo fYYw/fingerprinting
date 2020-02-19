@@ -35,8 +35,8 @@ def add_model_args(args=None):
     args.add_argument('--topic_dim', type=int, default=64)
     args.add_argument('--emotion_dim', type=int, default=6)
     args.add_argument('--sentiment_dim', type=int, default=64)
-    args.add_argument('--build_author_emb', type=str2bool, default=False)
-    args.add_argument('--build_author_track', type=str2bool, default=True)
+    args.add_argument('--build_author_emb', type=str2bool, default=True)
+    args.add_argument('--build_author_track', type=str2bool, default=False)
     args.add_argument('--build_author_predict', type=str2bool, default=True)
     args.add_argument('--build_topic_predict', type=str2bool, default=True)
     args.add_argument('--leverage_topic', type=str2bool, default=False,
@@ -67,7 +67,7 @@ def add_train_args(args=None):
     args.add_argument('--load_checkpoint', type=str2bool, default=False)
     args.add_argument('--build_auxiliary_task', type=str2bool, default=True)
     args.add_argument('--detach_article', type=str2bool, default=True)
-    args.add_argument('--free_fp', type=int, default=8,
+    args.add_argument('--free_fp', type=int, default=3,
                       help="Update fingerprinting component after # epoch. ")
     args.add_argument('--freeze_aux', type=int, default=3,
                       help="freeze updating auxiliary task after # epoch. ")

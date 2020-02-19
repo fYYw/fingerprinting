@@ -373,7 +373,7 @@ class Pipeline(object):
         f1, f1_each = {}, []
         for key, value in tmp_pre_tar.items():
             f1[key] = f1_score(tmp_pre_tar[key][1], tmp_pre_tar[key][0], labels=[1, 2], average='macro')
-            f1_each.extend(f1[key] * 2)
+            f1_each.append(f1[key] * 2)
         f1['mean'] = 1.0 * sum(f1_each) / (2 * len(f1_each))
         return acc, f1, pred_records
 
@@ -442,5 +442,9 @@ def get_even_class(tar, device):
 
 
 if __name__ == '__main__':
-    print('test')
-    print(np.mean([]))
+    a = [1, 0, 1, 0, 2, 2, 1]
+    b = [0, 1, 2, 2, 2, 1, 1]
+    f = f1_score(a, b, average='macro')
+    f1 = f1_score(a, b, average=None)
+    print(f1)
+    print(f)

@@ -99,10 +99,11 @@ def author_mean(author_scores, authors, comments, articles):
 if __name__ == '__main__':
     print(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
     for outlet in [
+        'archiveis'
         # 'theguardian',
         # 'washingtonpost',
-        'wsj',
-        'NewYorkTimes'
+        # 'wsj',
+        # 'NewYorkTimes'
                    ]: #os.listdir('e:/outlets'): #['Archiveis']:
         print("Working on {} ...".format(outlet))
         folder = os.path.join('e:/outlets', outlet)

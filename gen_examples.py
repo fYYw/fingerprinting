@@ -37,7 +37,16 @@ def gen_author_record(comment_dict, percentile=70, min_count=10):
                 author_idx += 1
             sorted_comment = sorted(author_record[author], key=lambda a: a[1])
             author_idx_record[author2idx[author]] = [cid for (cid, _) in sorted_comment]
-    return author_idx_record
+    article_author_idx_record = {}
+    for author, track in author_idx_record.items():
+        tmp_track = []
+        for cid in track:
+            pid = comment_dict[cid]['pid']
+            if pid == 'N' or not pid:
+                tmp_track.append(cid)
+        if len(tmp_track) >= max(filter_count, min_count):
+            article_author_idx_record[author] = tmp_track
+    return article_author_idx_record
 
 
 def bpe_article_comments(folder):
@@ -199,19 +208,19 @@ def test_tsv():
 if __name__ == '__main__':
     print(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
     for outlet in [
-        # 'Archiveis',
-        # 'cnn',
-        # 'DailyMail',
-        # 'foxnews',
+        'Archiveis',
+        'cnn',
+        'DailyMail',
+        'foxnews',
         'NewYorkTimes',
-        # 'theguardian',
-        # 'washingtonpost',
+        'theguardian',
+        'washingtonpost',
         'wsj'
     ]:  # os.listdir(ROOT):
         print("Working on {} ...".format(outlet))
-        # bpe_article_comments(os.path.join(ROOT, outlet))
-        # gen_examples(os.path.join(ROOT, outlet), percentile=60, min_count=4)
-        # add_sentiment_score(os.path.join(ROOT, outlet))
+        bpe_article_comments(os.path.join(ROOT, outlet))
+        gen_examples(os.path.join(ROOT, outlet), percentile=60, min_count=4)
+        add_sentiment_score(os.path.join(ROOT, outlet))
         # emotion_test(os.path.join(ROOT, outlet))
-        add_emotion_score(os.path.join(ROOT, outlet))
+        # add_emotion_score(os.path.join(ROOT, outlet))
         print("Finish at {}\n".format(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())))
