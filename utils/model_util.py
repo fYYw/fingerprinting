@@ -10,6 +10,7 @@ import numpy as np
 class Model(nn.Module):
     def __init__(self, config):
         super(Model, self).__init__()
+        self.config = config
         self.token_embedding = None
         self.token_encoder = getattr(nn, config['rnn_type'].upper())(
             input_size=config['token_dim'], hidden_size=config['hid_dim'] // 2,
@@ -100,7 +101,6 @@ class Model(nn.Module):
                                                                   int(config['token_mean_pool'])) +
                                              (config['hid_dim'] // 2) * int(config['token_last_pool']), 6)
 
-        self.config = config
 
     def build_embedding(self, vocab=None, embedding=None):
         if vocab and embedding:
