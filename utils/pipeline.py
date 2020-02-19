@@ -281,6 +281,7 @@ class Pipeline(object):
                                 for pred in test_preds:
                                     data = json.dumps(pred)
                                     f.write(data)
+                                    f.write('\n')
 
             print('BEST DEV: ', self.dev_perf)
             print('LOw DEV: ', low_dev_perf)
