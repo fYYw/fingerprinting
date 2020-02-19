@@ -4,6 +4,7 @@ import random
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
+from sklearn.metrics import f1_score
 
 import torch
 import torch.nn as nn
@@ -54,15 +55,15 @@ class Pipeline(object):
 
         self.y_freq = {}
 
-    def get_fp_loss(self, fp_result, fp_batch, loss_dict):
+    def get_fp_loss(self, fp_result, fp_batch, loss_dict, un_freeze_fp, un_freeze_author):
         loss = 0
-        if self.config['build_author_predict']:
+        if self.config['build_author_predict'] and un_freeze_author:
             author_loss = F.cross_entropy(fp_result['author'],
                                           torch.tensor(fp_batch['author'], device=self.device))
-            loss += 0.1 * author_loss
+            loss += author_loss
             loss_dict['author'].append(author_loss.item())
 
-        if self.config['vader']:
+        if self.config['vader'] and un_freeze_fp:
             v_tar = torch.tensor(fp_batch['v_tar'], device=self.device)
             v_even_idx = get_even_class(v_tar, device=self.device)
             if v_even_idx is not None:
@@ -70,9 +71,9 @@ class Pipeline(object):
                                              v_tar.index_select(0, v_even_idx))
             else:
                 vader_loss = 0
-            loss += 1.5 * vader_loss
+            loss += vader_loss
             loss_dict['v_pf'].append(vader_loss.item())
-        if self.config['flair']:
+        if self.config['flair'] and un_freeze_fp:
             f_tar = torch.tensor(fp_batch['f_tar'], device=self.device)
             f_even_idx = get_even_class(f_tar, device=self.device)
             if f_even_idx is not None:
@@ -82,7 +83,7 @@ class Pipeline(object):
                 flair_loss = 0
             loss += flair_loss
             loss_dict['f_pf'].append(flair_loss.item())
-        if self.config['sent']:
+        if self.config['sent'] and un_freeze_fp:
             s_tar = torch.tensor(fp_batch['s_tar'], device=self.device)
             s_even_idx = get_even_class(s_tar, device=self.device)
             if s_even_idx is not None:
@@ -92,7 +93,7 @@ class Pipeline(object):
                 sent_loss = 0
             loss += sent_loss
             loss_dict['s_pf'].append(sent_loss.item())
-        if self.config['subj']:
+        if self.config['subj'] and un_freeze_fp:
             b_tar = torch.tensor(fp_batch['b_tar'], device=self.device)
             b_even_idx = get_even_class(b_tar, device=self.device)
             if b_even_idx is not None:
@@ -103,7 +104,7 @@ class Pipeline(object):
             loss += subj_loss
             loss_dict['b_pf'].append(subj_loss.item())
 
-        if self.config['emotion']:
+        if self.config['emotion'] and un_freeze_fp:
             loss_per_dim = []
             e_tar = torch.tensor(fp_batch['e_tar'], device=self.device, dtype=torch.float)
             for dim_ in [0, 1, 2, 3, 4, 5]:
@@ -216,11 +217,12 @@ class Pipeline(object):
                     self.y_freq[key] = torch.tensor(value, device=self.device, dtype=torch.float)
 
             for i, batch_idx in enumerate(train_iter):
-                if self.config['free_fp'] < self.global_step:
-                    fp_batch, fp_result = self.get_result(batch_idx, train_examples)
-                    fp_loss = self.get_fp_loss(fp_result, fp_batch, self.train_loss)
-                else:
-                    fp_loss = 0
+                fp_batch, fp_result = self.get_result(batch_idx, train_examples)
+                update_author = (self.config['free_fp'] >= e) and (self.config['freeze_aux'] <= e)
+                update_fp = self.config['free_fp'] < e
+                fp_loss = self.get_fp_loss(fp_result, fp_batch, self.train_loss,
+                                           un_freeze_fp=update_fp,
+                                           un_freeze_author=update_author)
 
                 if self.config['build_auxiliary_task'] and self.config['freeze_aux'] > e:
                     aux_loss = self.get_aux_loss(batch_idx, train_examples, self.train_loss)
@@ -257,27 +259,28 @@ class Pipeline(object):
                     print(train_log)
                     self.train_procedure.append(train_log)
 
-                    high_dev_perf, _ = self.get_perf(self.high_dev_iter, self.high_dev_examples)
-                    # print('HIGH DEV: ', high_dev_perf)
+                    if update_fp:
+                        _, high_dev_perf, _ = self.get_perf(self.high_dev_iter, self.high_dev_examples)
+                        # print('HIGH DEV: ', high_dev_perf)
 
-                    if high_dev_perf['mean'] > self.dev_perf['mean']:
-                        self.dev_perf = high_dev_perf
-                        low_dev_perf, _ = self.get_perf(self.low_dev_iter, self.low_dev_examples)
+                        if high_dev_perf['mean'] > self.dev_perf['mean']:
+                            self.dev_perf = high_dev_perf
+                            _, low_dev_perf, _ = self.get_perf(self.low_dev_iter, self.low_dev_examples)
 
-                        torch.save({'model': self.model.state_dict(),
-                                    'adam': self.sgd.state_dict()},
-                                   os.path.join(self.config['root_folder'],
-                                                self.config['outlet'], 'best_model.pt'))
-                        test_perf, test_preds = self.get_perf(self.test_iter, self.test_examples)
-                        self.test_perf = test_perf
+                            torch.save({'model': self.model.state_dict(),
+                                        'adam': self.sgd.state_dict()},
+                                       os.path.join(self.config['root_folder'],
+                                                    self.config['outlet'], 'best_model.pt'))
+                            _, test_perf, test_preds = self.get_perf(self.test_iter, self.test_examples)
+                            self.test_perf = test_perf
 
-                        json.dump(test_perf, open(os.path.join(
-                            self.config['root_folder'], self.config['outlet'], 'test_perf.json'), 'w'))
-                        with open(os.path.join(self.config['root_folder'],
-                                               self.config['outlet'], 'test_pred.jsonl'), 'w') as f:
-                            for pred in test_preds:
-                                data = json.dumps(pred)
-                                f.write(data)
+                            json.dump(test_perf, open(os.path.join(
+                                self.config['root_folder'], self.config['outlet'], 'test_perf.json'), 'w'))
+                            with open(os.path.join(self.config['root_folder'],
+                                                   self.config['outlet'], 'test_pred.jsonl'), 'w') as f:
+                                for pred in test_preds:
+                                    data = json.dumps(pred)
+                                    f.write(data)
 
             print('BEST DEV: ', self.dev_perf)
             print('LOw DEV: ', low_dev_perf)
@@ -311,6 +314,7 @@ class Pipeline(object):
         pred_records = []
         tmp_cnt = {'vader': [0, 0], 'flair': [0, 0], 'sent': [0, 0], 'subj': [0, 0],
                    'emotion': [0, 0]}
+        tmp_pre_tar = {'vader': [[], []], 'flair': [[], []], 'sent': [[], []], 'subj': [[], []]}
         acc = {'vader': 0, 'flair': 0, 'sent': 0, 'subj': 0,
                'emotion': 0, 'mean': 0}
         self.model.eval()
@@ -325,21 +329,29 @@ class Pipeline(object):
                     pred_record['vader'][0] = fp_result['vader'][j].argmax().item()
                     pred_record['vader'][1] = fp_batch['v_tar'][j]
                     tmp_cnt['vader'][int(pred_record['vader'][0] == pred_record['vader'][1])] += 1
+                    tmp_pre_tar['vader'][0].append(pred_record['vader'][0])
+                    tmp_pre_tar['vader'][1].append(pred_record['vader'][1])
                     targets.append('vader')
                 if self.config['flair']:
                     pred_record['flair'][0] = fp_result['flair'][j].argmax().item()
                     pred_record['flair'][1] = fp_batch['f_tar'][j]
                     tmp_cnt['flair'][int(pred_record['flair'][0] == pred_record['flair'][1])] += 1
+                    tmp_pre_tar['flair'][0].append(pred_record['flair'][0])
+                    tmp_pre_tar['flair'][1].append(pred_record['flair'][1])
                     targets.append('flair')
                 if self.config['sent']:
                     pred_record['sent'][0] = fp_result['sent'][j].argmax().item()
                     pred_record['sent'][1] = fp_batch['s_tar'][j]
                     tmp_cnt['sent'][int(pred_record['sent'][0] == pred_record['sent'][1])] += 1
+                    tmp_pre_tar['sent'][0].append(pred_record['sent'][0])
+                    tmp_pre_tar['sent'][1].append(pred_record['sent'][1])
                     targets.append('sent')
                 if self.config['subj']:
                     pred_record['subj'][0] = fp_result['subj'][j].argmax().item()
                     pred_record['subj'][1] = fp_batch['b_tar'][j]
                     tmp_cnt['subj'][int(pred_record['subj'][0] == pred_record['subj'][1])] += 1
+                    tmp_pre_tar['subj'][0].append(pred_record['subj'][0])
+                    tmp_pre_tar['subj'][1].append(pred_record['subj'][1])
                     targets.append('subj')
                 if self.config['emotion']:
                     pred_emo = [int(i > 0) for i in fp_result['emotion'][j].detach().tolist()]
@@ -357,7 +369,12 @@ class Pipeline(object):
             acc['emotion'] = 1.0 * tmp_cnt['emotion'][0] / (tmp_cnt['emotion'][0] + tmp_cnt['emotion'][1])
             tmp_acc_sum.append(acc['emotion'])
         acc['mean'] = sum(tmp_acc_sum) / len(tmp_acc_sum)
-        return acc, pred_records
+        f1, f1_each = {}, []
+        for key, value in tmp_pre_tar.items():
+            f1[key] = f1_score(tmp_pre_tar[key][1], tmp_pre_tar[key][0], labels=[1, 2], average='macro')
+            f1_each.extend(f1[key] * 2)
+        f1['mean'] = 1.0 * sum(f1_each) / (2 * len(f1_each))
+        return acc, f1, pred_records
 
 
 def track_grad(named_parameters, layers, ave_grads, max_grads):

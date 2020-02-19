@@ -231,7 +231,8 @@ class Model(nn.Module):
         if self.config['build_author_predict']:
             result['author'] = self.author_predict(author_embeds)
 
-        final_rep = self.author_article_merge(torch.cat([author_embeds, article_target], dim=-1))
+        final_rep = self.author_article_merge(torch.cat([author_embeds.detach(),
+                                                         article_target.detach()], dim=-1))
 
         if self.config['flair']:
             result['flair'] = self.flair(final_rep)  # batch, seq, 3
