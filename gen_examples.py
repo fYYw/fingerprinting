@@ -32,11 +32,8 @@ def gen_author_record(comment_dict, percentile=70, min_count=10):
         if len(comments) < max(filter_count, min_count):
             del author_record[author]
         else:
-            if author not in author2idx:
-                author2idx[author] = author_idx
-                author_idx += 1
             sorted_comment = sorted(author_record[author], key=lambda a: a[1])
-            author_idx_record[author2idx[author]] = [cid for (cid, _) in sorted_comment]
+            author_idx_record[author] = [cid for (cid, _) in sorted_comment]
     article_author_idx_record = {}
     for author, track in author_idx_record.items():
         tmp_track = []
@@ -45,7 +42,10 @@ def gen_author_record(comment_dict, percentile=70, min_count=10):
             if pid == 'N' or not pid:
                 tmp_track.append(cid)
         if len(tmp_track) >= max(filter_count, min_count):
-            article_author_idx_record[author] = tmp_track
+            if author not in author2idx:
+                author2idx[author] = author_idx
+                author_idx += 1
+            article_author_idx_record[author2idx[author]] = tmp_track
     return article_author_idx_record
 
 
@@ -57,7 +57,10 @@ def bpe_article_comments(folder):
         article_dict = value['article']
         pure_article_dict[aid] = {'time': article_dict['time'],
                                   'title': article_dict['title'],
-                                  'bpe': ' '.join(bpemb_en.encode(unicodedata.normalize('NFD', article_dict['title']))),
+                                  't_bpe': ' '.join(
+                                      bpemb_en.encode(unicodedata.normalize('NFD', article_dict['title']))),
+                                  'a_bpe': ' '.join(
+                                      bpemb_en.encode(unicodedata.normalize('NFD', article_dict['content']))),
                                   'topic': article_dict['topic'], 'outlet': article_dict['outlet'],
                                   'category': article_dict['category']}
         for cid, c_value in value['comment'].items():
@@ -89,12 +92,14 @@ def gen_examples(folder, percentile, min_count):
         if a_value['topic'] not in topic2idx:
             topic2idx[a_value['topic']] = topic_idx
             topic_idx += 1
-        for token in a_value['bpe'].split():
+        for token in a_value['a_bpe'].split() + a_value['t_bpe'].split():
             if token not in word2idx and token in bpe_word2idx:
                 word2idx[token] = word_idx
                 word_idx += 1
-        article_idx[aid] = {'bpe': [word2idx[token] if token in word2idx else 1
-                                    for token in a_value['bpe'].split()],
+        article_idx[aid] = {'a_bpe': [word2idx[token] if token in word2idx else 1
+                                      for token in a_value['a_bpe'].split()],
+                            't_bpe': [word2idx[token] if token in word2idx else 1
+                                      for token in a_value['t_bpe'].split()],
                             'topic': topic2idx[a_value['topic']]}
 
     for cid, c_value in comment_dict.items():
@@ -130,32 +135,32 @@ def add_sentiment_score(folder):
     for cid in list(example_dict.keys()):
         if cid in sentiment_dict:
             if sentiment_dict[cid]['vader']['compound'] > 0:
-                vader = 1
-            elif sentiment_dict[cid]['vader']['compound'] < 0:
                 vader = 2
-            else:
+            elif sentiment_dict[cid]['vader']['compound'] < 0:
                 vader = 0
+            else:
+                vader = 1
 
             if sentiment_dict[cid]['blob'][0] > 0:
-                blob_sentiment = 1
-            elif sentiment_dict[cid]['blob'][0] < 0:
                 blob_sentiment = 2
-            else:
+            elif sentiment_dict[cid]['blob'][0] < 0:
                 blob_sentiment = 0
+            else:
+                blob_sentiment = 1
 
             if sentiment_dict[cid]['blob'][1] > 0.5:
-                blob_subjective = 1
-            elif sentiment_dict[cid]['blob'][1] < 0.5:
                 blob_subjective = 2
-            else:
+            elif sentiment_dict[cid]['blob'][1] < 0.5:
                 blob_subjective = 0
+            else:
+                blob_subjective = 1
 
             if sentiment_dict[cid]['flair'][0][1] == 'POSITIVE':
-                flair = 1
-            elif sentiment_dict[cid]['flair'][0][1] == 'NEGATIVE':
                 flair = 2
-            else:
+            elif sentiment_dict[cid]['flair'][0][1] == 'NEGATIVE':
                 flair = 0
+            else:
+                flair = 1
             example_dict[cid]['sentiment'] = {'vader': vader, 'flair': flair,
                                               'blob_sentiment': blob_sentiment,
                                               'blob_subjective': blob_subjective}
@@ -209,17 +214,15 @@ if __name__ == '__main__':
     print(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
     for outlet in [
         'Archiveis',
-        'cnn',
         'DailyMail',
         'foxnews',
         'NewYorkTimes',
         'theguardian',
-        'washingtonpost',
         'wsj'
     ]:  # os.listdir(ROOT):
         print("Working on {} ...".format(outlet))
-        bpe_article_comments(os.path.join(ROOT, outlet))
-        gen_examples(os.path.join(ROOT, outlet), percentile=60, min_count=4)
+        # bpe_article_comments(os.path.join(ROOT, outlet))
+        # gen_examples(os.path.join(ROOT, outlet), percentile=60, min_count=4)
         add_sentiment_score(os.path.join(ROOT, outlet))
         # emotion_test(os.path.join(ROOT, outlet))
         # add_emotion_score(os.path.join(ROOT, outlet))

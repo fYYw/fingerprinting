@@ -67,40 +67,56 @@ class Pipeline(object):
             v_tar = torch.tensor(fp_batch['v_tar'], device=self.device)
             v_even_idx = get_even_class(v_tar, device=self.device)
             if v_even_idx is not None:
-                vader_loss = F.cross_entropy(fp_result['vader'].index_select(0, v_even_idx),
-                                             v_tar.index_select(0, v_even_idx))
+                if self.config['loss_func'] == 'ce':
+                    vader_loss = F.cross_entropy(fp_result['vader'].index_select(0, v_even_idx),
+                                                 v_tar.index_select(0, v_even_idx))
+                else:
+                    vader_loss = F.mse_loss(fp_result['vader'].index_select(0, v_even_idx),
+                                            v_tar.index_select(0, v_even_idx).float() - 1)
             else:
-                vader_loss = 0
+                vader_loss = torch.zeros(1)
             loss += vader_loss
             loss_dict['v_pf'].append(vader_loss.item())
         if self.config['flair'] and un_freeze_fp:
             f_tar = torch.tensor(fp_batch['f_tar'], device=self.device)
             f_even_idx = get_even_class(f_tar, device=self.device)
             if f_even_idx is not None:
-                flair_loss = F.cross_entropy(fp_result['flair'].index_select(0, f_even_idx),
-                                             f_tar.index_select(0, f_even_idx))
+                if self.config['loss_func'] == 'ce':
+                    flair_loss = F.cross_entropy(fp_result['flair'].index_select(0, f_even_idx),
+                                                 f_tar.index_select(0, f_even_idx))
+                else:
+                    flair_loss = F.mse_loss(fp_result['flair'].index_select(0, f_even_idx),
+                                            f_tar.index_select(0, f_even_idx).float() - 1)
             else:
-                flair_loss = 0
+                flair_loss = torch.zeros(1)
             loss += flair_loss
             loss_dict['f_pf'].append(flair_loss.item())
         if self.config['sent'] and un_freeze_fp:
             s_tar = torch.tensor(fp_batch['s_tar'], device=self.device)
             s_even_idx = get_even_class(s_tar, device=self.device)
             if s_even_idx is not None:
-                sent_loss = F.cross_entropy(fp_result['sent'].index_select(0, s_even_idx),
-                                            s_tar.index_select(0, s_even_idx))
+                if self.config['loss_func'] == 'ce':
+                    sent_loss = F.cross_entropy(fp_result['sent'].index_select(0, s_even_idx),
+                                                s_tar.index_select(0, s_even_idx))
+                else:
+                    sent_loss = F.mse_loss(fp_result['sent'].index_select(0, s_even_idx),
+                                           s_tar.index_select(0, s_even_idx).float() - 1)
             else:
-                sent_loss = 0
+                sent_loss = torch.zeros(1)
             loss += sent_loss
             loss_dict['s_pf'].append(sent_loss.item())
         if self.config['subj'] and un_freeze_fp:
             b_tar = torch.tensor(fp_batch['b_tar'], device=self.device)
             b_even_idx = get_even_class(b_tar, device=self.device)
             if b_even_idx is not None:
-                subj_loss = F.cross_entropy(fp_result['subj'].index_select(0, b_even_idx),
-                                            b_tar.index_select(0, b_even_idx))
+                if self.config['loss_func'] == 'ce':
+                    subj_loss = F.cross_entropy(fp_result['vader'].index_select(0, b_even_idx),
+                                                b_tar.index_select(0, b_even_idx))
+                else:
+                    subj_loss = F.mse_loss(fp_result['subj'].index_select(0, b_even_idx),
+                                           b_tar.index_select(0, b_even_idx).float() - 1)
             else:
-                subj_loss = 0
+                subj_loss = torch.zeros(1)
             loss += subj_loss
             loss_dict['b_pf'].append(subj_loss.item())
 
@@ -197,7 +213,6 @@ class Pipeline(object):
                                read_target=fp_batch['r_target'],
                                read_track=fp_batch['r_track'],
                                write_track=fp_batch['w_track'],
-                               emotion_track=fp_batch['e_tra'],
                                sentiment_track=(fp_batch['v_tra'],
                                                 fp_batch['f_tra'],
                                                 fp_batch['s_tra'],
@@ -210,7 +225,8 @@ class Pipeline(object):
         for e in range(self.epoch):
             grad_dict = {'layer': [], 'ave': [], 'max': []}
             train_examples = self.data_io.build_train_examples(pre_cnt=self.config['previous_comment_cnt'],
-                                                               min_cnt=self.config['min_comment_cnt'])
+                                                               # min_cnt=self.config['min_comment_cnt'])
+                                                               min_cnt=0)
             train_iter = self.data_io.build_iter_idx(train_examples, True)
             if not self.y_freq:
                 for key, value in self.data_io.y_frequency.items():
@@ -218,27 +234,31 @@ class Pipeline(object):
 
             for i, batch_idx in enumerate(train_iter):
                 fp_batch, fp_result = self.get_result(batch_idx, train_examples)
-                update_author = (self.config['free_fp'] >= e) and (self.config['freeze_aux'] <= e)
-                update_fp = self.config['free_fp'] < e
+                update_aux = self.config['build_auxiliary_task'] and e < self.config['freeze_aux']
+                if update_aux:
+                    aux_loss = self.get_aux_loss(batch_idx, train_examples, self.train_loss)
+                else:
+                    aux_loss = 0
+                update_author = (e <= self.config['free_fp']) and (
+                        e >= self.config['freeze_aux']) and self.config['build_author_predict']
+                update_fp = (e > self.config['free_fp']) or ((not update_author) and not update_aux)
                 fp_loss = self.get_fp_loss(fp_result, fp_batch, self.train_loss,
                                            un_freeze_fp=update_fp,
                                            un_freeze_author=update_author)
 
-                if self.config['build_auxiliary_task'] and self.config['freeze_aux'] > e:
-                    aux_loss = self.get_aux_loss(batch_idx, train_examples, self.train_loss)
-                else:
-                    aux_loss = 0
-
                 loss = fp_loss + aux_loss
-                loss.backward()
-                if self.config['track_grad']:
-                    track_grad(self.model.named_parameters(),
-                               grad_dict['layer'], grad_dict['ave'], grad_dict['max'])
-                if self.global_step % self.config['update_iter'] == 0:
-                    clip_grad_norm_(self.params, self.config['grad_clip'])
-                    self.sgd.step()
-                    self.sgd.zero_grad()
-                self.global_step += 1
+                try:
+                    loss.backward()
+                    if self.config['track_grad']:
+                        track_grad(self.model.named_parameters(),
+                                   grad_dict['layer'], grad_dict['ave'], grad_dict['max'])
+                    if self.global_step % self.config['update_iter'] == 0:
+                        clip_grad_norm_(self.params, self.config['grad_clip'])
+                        self.sgd.step()
+                        self.sgd.zero_grad()
+                    self.global_step += 1
+                except RuntimeError:
+                    continue
 
                 if self.global_step % (self.config['check_step']
                                        * self.config['update_iter']) == 0:
@@ -319,7 +339,7 @@ class Pipeline(object):
         acc = {'vader': 0, 'flair': 0, 'sent': 0, 'subj': 0,
                'emotion': 0, 'mean': 0}
         self.model.eval()
-        targets = []
+        targets = set()
         for i, batch_idx in enumerate(data_iter):
             fp_batch, fp_result = self.get_result(batch_idx, examples)
 
@@ -332,28 +352,28 @@ class Pipeline(object):
                     tmp_cnt['vader'][int(pred_record['vader'][0] == pred_record['vader'][1])] += 1
                     tmp_pre_tar['vader'][0].append(pred_record['vader'][0])
                     tmp_pre_tar['vader'][1].append(pred_record['vader'][1])
-                    targets.append('vader')
+                    targets.add('vader')
                 if self.config['flair']:
                     pred_record['flair'][0] = fp_result['flair'][j].argmax().item()
                     pred_record['flair'][1] = fp_batch['f_tar'][j]
                     tmp_cnt['flair'][int(pred_record['flair'][0] == pred_record['flair'][1])] += 1
                     tmp_pre_tar['flair'][0].append(pred_record['flair'][0])
                     tmp_pre_tar['flair'][1].append(pred_record['flair'][1])
-                    targets.append('flair')
+                    targets.add('flair')
                 if self.config['sent']:
                     pred_record['sent'][0] = fp_result['sent'][j].argmax().item()
                     pred_record['sent'][1] = fp_batch['s_tar'][j]
                     tmp_cnt['sent'][int(pred_record['sent'][0] == pred_record['sent'][1])] += 1
                     tmp_pre_tar['sent'][0].append(pred_record['sent'][0])
                     tmp_pre_tar['sent'][1].append(pred_record['sent'][1])
-                    targets.append('sent')
+                    targets.add('sent')
                 if self.config['subj']:
                     pred_record['subj'][0] = fp_result['subj'][j].argmax().item()
                     pred_record['subj'][1] = fp_batch['b_tar'][j]
                     tmp_cnt['subj'][int(pred_record['subj'][0] == pred_record['subj'][1])] += 1
                     tmp_pre_tar['subj'][0].append(pred_record['subj'][0])
                     tmp_pre_tar['subj'][1].append(pred_record['subj'][1])
-                    targets.append('subj')
+                    targets.add('subj')
                 if self.config['emotion']:
                     pred_emo = [int(i > 0) for i in fp_result['emotion'][j].detach().tolist()]
                     pred_record['emotion'][0] = pred_emo

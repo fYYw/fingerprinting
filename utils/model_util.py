@@ -7,99 +7,16 @@ from torch.nn.utils.rnn import pad_packed_sequence as unpack
 import numpy as np
 
 
-class Model(nn.Module):
+class ModelBase(nn.Module):
     def __init__(self, config):
-        super(Model, self).__init__()
+        super(ModelBase, self).__init__()
         self.config = config
         self.token_embedding = None
         self.token_encoder = getattr(nn, config['rnn_type'].upper())(
             input_size=config['token_dim'], hidden_size=config['hid_dim'] // 2,
-            num_layers=1, dropout=config['dropout'],
+            num_layers=config['rnn_layer'], dropout=config['dropout'],
             batch_first=True, bidirectional=True)
         self.dropout = nn.Dropout(config['dropout'])
-
-        author_final_dim = 0
-        if config['build_author_emb']:
-            self.author_embedding = nn.Embedding(config['author_size'], config['author_dim'])
-            author_final_dim += config['author_dim']
-        if config['build_author_track']:
-            input_size = 2 * config['hid_dim'] * (int(config['token_max_pool']) +
-                                                  int(config['token_mean_pool']))
-            input_size += config['hid_dim'] * int(config['token_last_pool'])
-            if config['build_sentiment_embedding']:
-                if self.config['vader']:
-                    self.vader_embed = nn.Embedding(3, config['sentiment_dim'])
-                    input_size += config['sentiment_dim']
-                if self.config['flair']:
-                    self.flair_embed = nn.Embedding(3, config['sentiment_dim'])
-                    input_size += config['sentiment_dim']
-                if self.config['sent']:
-                    self.sent_embed = nn.Embedding(3, config['sentiment_dim'])
-                    input_size += config['sentiment_dim']
-                if self.config['subj']:
-                    self.subj_embed = nn.Embedding(3, config['sentiment_dim'])
-                    input_size += config['sentiment_dim']
-            if config['build_topic_predict'] and config['leverage_topic']:
-                input_size += config['topic_size']
-            if config['leverage_emotion']:
-                input_size += 6
-            self.timestamp_merge = nn.Linear(input_size, config['author_track_dim'])
-            self.track_encoder = getattr(nn, config['rnn_type'].upper())(
-                input_size=config['author_track_dim'], hidden_size=config['hid_dim'],
-                num_layers=config['rnn_layer'], dropout=config['dropout'],
-                batch_first=True, bidirectional=False)
-            author_final_dim += config['hid_dim'] * (int(config['track_max_pool']) +
-                                                     int(config['track_mean_pool']) +
-                                                     int(config['track_last_pool']))
-
-        if config['build_author_predict']:
-            self.author_predict = nn.Linear(author_final_dim, config['author_size'])
-
-        self.author_article_merge = nn.Sequential(
-            nn.Linear(author_final_dim + (config['hid_dim'] // 2) * int(config['token_last_pool']) +
-                      config['hid_dim'] * (int(config['token_max_pool']) +
-                                           int(config['token_mean_pool'])),
-                      config['hid_dim'] * 2),
-            nn.Tanh(),
-            nn.Linear(config['hid_dim'] * 2, config['hid_dim'] * 2),
-            nn.Tanh())
-
-        if config['vader']:
-            self.vader = nn.Linear(config['hid_dim'] * 2, 3)
-        if config['flair']:
-            self.flair = nn.Linear(config['hid_dim'] * 2, 3)
-        if config['sent']:
-            self.sent = nn.Linear(config['hid_dim'] * 2, 3)
-        if config['subj']:
-            self.subj = nn.Linear(config['hid_dim'] * 2, 3)
-        if config['emotion']:
-            self.emotion = nn.Linear(config['hid_dim'] * 2, 6)
-
-        if config['build_topic_predict']:
-            self.topic_predict = nn.Linear(config['hid_dim'] * (int(config['token_max_pool']) +
-                                                                int(config['token_mean_pool'])) +
-                                           (config['hid_dim'] // 2) * int(config['token_last_pool']),
-                                           config['topic_size'])
-        if config['vader']:
-            self.vader_predict = nn.Linear(config['hid_dim'] * (int(config['token_max_pool']) +
-                                                                int(config['token_mean_pool'])) +
-                                           (config['hid_dim'] // 2) * int(config['token_last_pool']), 3)
-        if config['flair']:
-            self.flair_predict = nn.Linear(config['hid_dim'] * (int(config['token_max_pool']) +
-                                                                int(config['token_mean_pool'])) +
-                                           (config['hid_dim'] // 2) * int(config['token_last_pool']), 3)
-        if config['sent']:
-            self.sent_predict = nn.Linear(config['hid_dim'] * (int(config['token_max_pool']) +
-                                                               int(config['token_mean_pool'])) +
-                                          (config['hid_dim'] // 2) * int(config['token_last_pool']), 3)
-        if config['subj']:
-            self.subj_predict = nn.Linear(config['hid_dim'] * (int(config['token_max_pool']) +
-                                                               int(config['token_mean_pool'])) +
-                                          (config['hid_dim'] // 2) * int(config['token_last_pool']), 3)
-        if config['emotion']:
-            self.emotion_predict = nn.Linear(config['hid_dim'] * (int(config['token_max_pool']) +
-                                                                  int(config['token_mean_pool'])) +
-                                             (config['hid_dim'] // 2) * int(config['token_last_pool']), 6)
 
     def build_embedding(self, vocab=None, embedding=None):
         if vocab and embedding:
@@ -155,8 +72,147 @@ class Model(nn.Module):
         else:
             return pooled_result
 
+
+class NeuralCF(ModelBase):
+    def __init__(self, config):
+        super(NeuralCF, self).__init__(config)
+        hid_dim = (config['hid_dim'] // 2) * (2 * (int(config['token_max_pool'])
+                                                   + int(config['token_mean_pool']))
+                                              + int(config['token_last_pool']))
+        self.author_embedding = nn.Embedding(config['author_size'], config['author_dim'])
+        if config['vader']:
+            self.vader = nn.Linear(hid_dim, config['author_dim'], bias=False)
+        if config['flair']:
+            self.flair = nn.Linear(hid_dim, config['author_dim'], bias=False)
+        if config['sent']:
+            self.sent = nn.Linear(hid_dim, config['author_dim'], bias=False)
+        if config['subj']:
+            self.subj = nn.Linear(hid_dim, config['author_dim'], bias=False)
+
+    def get_score(self, network, authors, articles):
+        """ Authors: (batch, a_dim), articles: (batch, h_dim) """
+        tmp = network(articles).unsqueeze(-1)  # batch, a_dim, 1
+        return torch.bmm(authors.unsqueeze(1), tmp).squeeze(1).squeeze(1)  # batch, 1
+
+    def forward(self, author, read_target, device):
+        """
+        :param author: (batch, )
+        :param read_target: (batch, token_len) * 2
+        :param deivce: torch.device
+        :return:
+        """
+        result = {}
+        author = torch.tensor(author, device=device)
+        # 0: tracks, 1: token_mask, 2: track_mask
+        read_target = [torch.tensor(r, device=device) for r in read_target]
+
+        article_target = self.rnn_encode(self.token_encoder,
+                                         self.token_embedding(read_target[0]), read_target[1],
+                                         max_pool=self.config['token_max_pool'],
+                                         mean_pool=self.config['token_mean_pool'],
+                                         last_pool=self.config['token_last_pool'])
+        author_embeds = self.author_embedding(author)
+        if self.config['vader']:
+            result['vader'] = self.get_score(self.vader, author_embeds, article_target)
+        if self.config['flair']:
+            result['flair'] = self.get_score(self.flair, author_embeds, article_target)
+        if self.config['sent']:
+            result['sent'] = self.get_score(self.sent, author_embeds, article_target)
+        if self.config['subj']:
+            result['subj'] = self.get_score(self.subj, author_embeds, article_target)
+        return result
+
+
+class Model(ModelBase):
+    def __init__(self, config):
+        super(Model, self).__init__(config)
+
+        author_final_dim = 0
+        if config['build_author_emb']:
+            self.author_embedding = nn.Embedding(config['author_size'], config['author_dim'])
+            author_final_dim += config['author_dim']
+        if config['build_author_track']:
+            input_size = 2 * config['hid_dim'] * (int(config['token_max_pool']) +
+                                                  int(config['token_mean_pool']))
+            input_size += config['hid_dim'] * int(config['token_last_pool'])
+            if config['build_sentiment_embedding']:
+                if self.config['vader']:
+                    self.vader_embed = nn.Embedding(3, config['sentiment_dim'])
+                    input_size += config['sentiment_dim']
+                if self.config['flair']:
+                    self.flair_embed = nn.Embedding(3, config['sentiment_dim'])
+                    input_size += config['sentiment_dim']
+                if self.config['sent']:
+                    self.sent_embed = nn.Embedding(3, config['sentiment_dim'])
+                    input_size += config['sentiment_dim']
+                if self.config['subj']:
+                    self.subj_embed = nn.Embedding(3, config['sentiment_dim'])
+                    input_size += config['sentiment_dim']
+            if config['build_topic_predict'] and config['leverage_topic']:
+                input_size += config['topic_size']
+            if config['leverage_emotion']:
+                input_size += 6
+            self.timestamp_merge = nn.Linear(input_size, config['author_track_dim'])
+            self.track_encoder = getattr(nn, config['rnn_type'].upper())(
+                input_size=config['author_track_dim'], hidden_size=config['hid_dim'],
+                num_layers=config['rnn_layer'], dropout=config['dropout'],
+                batch_first=True, bidirectional=False)
+            author_final_dim += config['hid_dim'] * (int(config['track_max_pool']) +
+                                                     int(config['track_mean_pool']) +
+                                                     int(config['track_last_pool']))
+
+        if config['build_author_predict']:
+            self.author_predict = nn.Linear(author_final_dim, config['author_size'])
+
+        self.author_article_merge = nn.Sequential(
+            nn.Linear(author_final_dim + (config['hid_dim'] // 2) * int(config['token_last_pool']) +
+                      config['hid_dim'] * (int(config['token_max_pool']) +
+                                           int(config['token_mean_pool'])),
+                      config['hid_dim'] * 2),
+            nn.Tanh(),
+            nn.Linear(config['hid_dim'] * 2, config['hid_dim'] * 2),
+            nn.Tanh())
+
+        output_dim = 1 if config['loss_func'] == 'mse' else 3
+        if config['vader']:
+            self.vader = nn.Linear(config['hid_dim'] * 2, output_dim)
+        if config['flair']:
+            self.flair = nn.Linear(config['hid_dim'] * 2, output_dim)
+        if config['sent']:
+            self.sent = nn.Linear(config['hid_dim'] * 2, output_dim)
+        if config['subj']:
+            self.subj = nn.Linear(config['hid_dim'] * 2, output_dim)
+        if config['emotion']:
+            self.emotion = nn.Linear(config['hid_dim'] * 2, 6)
+
+        if config['build_topic_predict']:
+            self.topic_predict = nn.Linear(config['hid_dim'] * (int(config['token_max_pool']) +
+                                                                int(config['token_mean_pool'])) +
+                                           (config['hid_dim'] // 2) * int(config['token_last_pool']),
+                                           config['topic_size'])
+        if config['vader']:
+            self.vader_predict = nn.Linear(config['hid_dim'] * (int(config['token_max_pool']) +
+                                                                int(config['token_mean_pool'])) +
+                                           (config['hid_dim'] // 2) * int(config['token_last_pool']), 3)
+        if config['flair']:
+            self.flair_predict = nn.Linear(config['hid_dim'] * (int(config['token_max_pool']) +
+                                                                int(config['token_mean_pool'])) +
+                                           (config['hid_dim'] // 2) * int(config['token_last_pool']), 3)
+        if config['sent']:
+            self.sent_predict = nn.Linear(config['hid_dim'] * (int(config['token_max_pool']) +
+                                                               int(config['token_mean_pool'])) +
+                                          (config['hid_dim'] // 2) * int(config['token_last_pool']), 3)
+        if config['subj']:
+            self.subj_predict = nn.Linear(config['hid_dim'] * (int(config['token_max_pool']) +
+                                                               int(config['token_mean_pool'])) +
+                                          (config['hid_dim'] // 2) * int(config['token_last_pool']), 3)
+        if config['emotion']:
+            self.emotion_predict = nn.Linear(config['hid_dim'] * (int(config['token_max_pool']) +
+                                                                  int(config['token_mean_pool'])) +
+                                             (config['hid_dim'] // 2) * int(config['token_last_pool']), 6)
+
     def fingerprint(self, author, read_target,
-                    read_track, write_track, sentiment_track, emotion_track, device):
+                    read_track, write_track, sentiment_track, emotion_track=None, device=torch.device('cpu')):
         """
         :param author: (batch, )
         :param read_target: (batch, token_len) * 2
@@ -235,7 +291,8 @@ class Model(nn.Module):
                                                              article_target.detach()], dim=-1))
         elif self.config['build_author_emb'] and not self.config['build_author_track']:
             final_rep = self.author_article_merge(torch.cat([author_embeds,
-                                                             article_target.detach()], dim=-1))
+                                                             # article_target.detach()], dim=-1))
+                                                             article_target], dim=-1))
         else:
             raise NotImplementedError()
 
@@ -285,9 +342,9 @@ class Model(nn.Module):
         if is_auxiliary:
             return self.auxiliary_predict(kwargs['x'], kwargs['target'], kwargs['device'])
         else:
-            return self.fingerprint(kwargs['author'], kwargs['read_target'],
-                                    kwargs['read_track'], kwargs['write_track'],
-                                    kwargs['sentiment_track'], kwargs['emotion_track'], kwargs['device'])
+            return self.fingerprint(author=kwargs['author'], read_target=kwargs['read_target'],
+                                    read_track=kwargs['read_track'], write_track=kwargs['write_track'],
+                                    sentiment_track=kwargs['sentiment_track'], device=kwargs['device'])
 
 
 def sort_tensor_len(lengths):
