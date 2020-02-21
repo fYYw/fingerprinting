@@ -152,8 +152,7 @@ class IO(object):
                  max_seq_len=128,
                  previous_comment_cnt=6,
                  min_comment_cnt=6,
-                 target_sentiment=True,
-                 target_emotion=False):
+                 target_sentiment=True):
         self.authors = json.load(open(os.path.join(folder_path, 'frequent_author_record.json')))
         self.articles = json.load(open(os.path.join(folder_path, 'article_idx.json')))
         self.comments = json.load(open(os.path.join(folder_path, 'sentiment_comment.json')))
@@ -163,7 +162,6 @@ class IO(object):
 
         self.batch_size = batch_size
         self.target_sentiment = target_sentiment
-        self.target_emotion = target_emotion
 
         self.previous_cnt = previous_comment_cnt
         self.min_comment_cnt = min_comment_cnt
@@ -173,8 +171,7 @@ class IO(object):
         self.y_frequency = {'vader': np.zeros((3,), dtype=float),
                             'flair': np.zeros((3,), dtype=float),
                             'sent': np.zeros((3,), dtype=float),
-                            'subj': np.zeros((3,), dtype=float),
-                            'emotion': np.zeros((6, 2), dtype=float)}
+                            'subj': np.zeros((3,), dtype=float)}
 
     def load_vocab(self, folder):
         for line in open(os.path.join(folder, 'vocab.token'), encoding='utf-8'):
@@ -205,21 +202,15 @@ class IO(object):
                         self.y_frequency['flair'][comment['sentiment']['flair']] += 1
                         self.y_frequency['sent'][comment['sentiment']['blob_sentiment']] += 1
                         self.y_frequency['subj'][comment['sentiment']['blob_subjective']] += 1
-                        # for j, v in enumerate(comment['emotion']):
-                        #     self.y_frequency['emotion'][j][v] += 1
                     if i > len(tmp_track) - pre_cnt:  # 0:
                         examples[example_id] = (author, tmp_track[i], tmp_track[max(-pre_cnt + i, 0): i])
                         example_id += 1
         if not self.y_update:
             for key, value in self.y_frequency.items():
-                if key == 'emotion':
-                    tmp_value = value[:, 0] / value[:, 1]
-                    self.y_frequency[key] = tmp_value
-                else:
-                    tmp_value = value.sum() / value
-                    tmp_value = np.nan_to_num(tmp_value, nan=0, posinf=0, neginf=0)
-                    tmp_value /= np.min(tmp_value[tmp_value.nonzero()])
-                    self.y_frequency[key] = tmp_value
+                tmp_value = value.sum() / value
+                tmp_value = np.nan_to_num(tmp_value, nan=0, posinf=0, neginf=0)
+                tmp_value /= np.min(tmp_value[tmp_value.nonzero()])
+                self.y_frequency[key] = tmp_value
             self.y_update = True
         return examples
 
@@ -253,7 +244,6 @@ class IO(object):
                     f_tar.append(self.comments[cid]['sentiment']['flair'])
                     s_tar.append(self.comments[cid]['sentiment']['blob_sentiment'])
                     b_tar.append(self.comments[cid]['sentiment']['blob_subjective'])
-                    # e_tar.append(self.comments[cid]['emotion'])
 
                     aid = self.comments[cid]['aid']
                     if aid not in a_uni:
@@ -299,10 +289,9 @@ class IO(object):
             f_tar.append(self.comments[cid_tar]['sentiment']['flair'])
             s_tar.append(self.comments[cid_tar]['sentiment']['blob_sentiment'])
             b_tar.append(self.comments[cid_tar]['sentiment']['blob_subjective'])
-            # e_tar.append(self.comments[cid_tar]['emotion'])
 
             r_track, w_track = [], []
-            vader, flair, sent, subj, emotion = [], [], [], [], []
+            vader, flair, sent, subj = [], [], [], []
             for cid in example[2]:
                 pid = self.comments[cid]['pid']
                 aid = self.comments[cid]['aid']
@@ -324,14 +313,12 @@ class IO(object):
                 flair.append(self.comments[cid]['sentiment']['flair'])
                 sent.append(self.comments[cid]['sentiment']['blob_sentiment'])
                 subj.append(self.comments[cid]['sentiment']['blob_subjective'])
-                # emotion.append(self.comments[cid]['emotion'])
             r_tracks.append(r_track)
             w_tracks.append(w_track)
             v_tra.append(vader)
             f_tra.append(flair)
             s_tra.append(sent)
             b_tra.append(subj)
-            # e_tra.append(emotion)
         batched_input['author'] = author
         batched_input['r_track'] = pad_seq_seq(r_tracks, pad_idx=0,
                                                max_word_seq=self.max_seq_len, max_track_seq=-1)

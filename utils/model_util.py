@@ -94,7 +94,7 @@ class NeuralCF(ModelBase):
         tmp = network(articles).unsqueeze(-1)  # batch, a_dim, 1
         return torch.bmm(authors.unsqueeze(1), tmp).squeeze(1).squeeze(1)  # batch, 1
 
-    def forward(self, author, read_target, device):
+    def forward(self, author, read_target, device, **kwargs):
         """
         :param author: (batch, )
         :param read_target: (batch, token_len) * 2
@@ -150,8 +150,6 @@ class Model(ModelBase):
                     input_size += config['sentiment_dim']
             if config['build_topic_predict'] and config['leverage_topic']:
                 input_size += config['topic_size']
-            if config['leverage_emotion']:
-                input_size += 6
             self.timestamp_merge = nn.Linear(input_size, config['author_track_dim'])
             self.track_encoder = getattr(nn, config['rnn_type'].upper())(
                 input_size=config['author_track_dim'], hidden_size=config['hid_dim'],
@@ -182,8 +180,6 @@ class Model(ModelBase):
             self.sent = nn.Linear(config['hid_dim'] * 2, output_dim)
         if config['subj']:
             self.subj = nn.Linear(config['hid_dim'] * 2, output_dim)
-        if config['emotion']:
-            self.emotion = nn.Linear(config['hid_dim'] * 2, 6)
 
         if config['build_topic_predict']:
             self.topic_predict = nn.Linear(config['hid_dim'] * (int(config['token_max_pool']) +
@@ -206,20 +202,15 @@ class Model(ModelBase):
             self.subj_predict = nn.Linear(config['hid_dim'] * (int(config['token_max_pool']) +
                                                                int(config['token_mean_pool'])) +
                                           (config['hid_dim'] // 2) * int(config['token_last_pool']), 3)
-        if config['emotion']:
-            self.emotion_predict = nn.Linear(config['hid_dim'] * (int(config['token_max_pool']) +
-                                                                  int(config['token_mean_pool'])) +
-                                             (config['hid_dim'] // 2) * int(config['token_last_pool']), 6)
 
     def fingerprint(self, author, read_target,
-                    read_track, write_track, sentiment_track, emotion_track=None, device=torch.device('cpu')):
+                    read_track, write_track, sentiment_track, device=torch.device('cpu')):
         """
         :param author: (batch, )
         :param read_target: (batch, token_len) * 2
         :param read_track: (batch, track_len, token_len), (batch, track_len, token_len), (batch, track_len)
         :param write_track: (batch, track_len, token_len), (batch, track_len, token_len), (batch, track_len)
         :param sentiment_track: (batch, track_len) * 4
-        :param emotion_track: (batch, track_len, 6)
         :param device: torch.device
         :return: dict
         """
@@ -267,8 +258,6 @@ class Model(ModelBase):
                 if self.config['build_topic_predict'] and self.config['leverage_topic']:
                     predict_topic = F.softmax(self.topic_predict(reads).detach(), dim=-1)
                     tracks.append(predict_topic)
-                if self.config['leverage_emotion']:
-                    tracks.append(torch.tensor(emotion_track, device=device, dtype=torch.float))
             track_embeds = torch.cat(tracks, dim=-1)
             track_embeds = torch.tanh(self.timestamp_merge(track_embeds))  # batch, track_len, dim
             tracks = self.rnn_encode(self.track_encoder, track_embeds, write_track[2],
@@ -305,9 +294,6 @@ class Model(ModelBase):
         if self.config['subj']:
             result['subj'] = self.subj(final_rep)
 
-        if self.config['emotion']:
-            result['emotion'] = self.emotion(final_rep)
-
         return result
 
     def auxiliary_predict(self, x, target, device):
@@ -332,8 +318,6 @@ class Model(ModelBase):
             result['sent'] = self.sent_predict(embeds)
         if 'subj' in target:
             result['subj'] = self.subj_predict(embeds)
-        if 'emotion' in target:
-            result['emotion'] = self.emotion_predict(embeds)
         if 'topic' in target:
             result['topic'] = self.topic_predict(embeds)
         return result

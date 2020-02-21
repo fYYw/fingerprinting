@@ -45,16 +45,13 @@ def main():
               'hid_dim': args.hid_dim,
               'dropout': args.dropout,
               'sentiment_dim': args.sentiment_dim,
-              'emotion_dim': args.emotion_dim,
               'build_sentiment_embedding': args.build_sentiment_embedding,
               'build_author_emb': args.build_author_emb,
               'build_author_track': args.build_author_track,
               'build_author_predict': args.build_author_predict,
               'build_topic_predict': args.build_topic_predict,
               'build_sentiment_predict': args.build_sentiment_predict,
-              'build_emotion_predict': args.build_emotion_predict,
               'leverage_topic': args.leverage_topic,
-              'leverage_emotion': args.leverage_emotion,
               'lr': args.lr,
               'epoch': args.epoch,
               'update_iter': args.update_iter,
@@ -80,7 +77,6 @@ def main():
               'flair': args.flair,
               'sent': args.sent,
               'subj': args.subj,
-              'emotion': args.emotion,
               'loss_func': args.loss_func
               }
     for key, value in config.items():
@@ -99,8 +95,7 @@ def main():
                         max_seq_len=config['max_seq_len'],
                         previous_comment_cnt=config['previous_comment_cnt'],
                         min_comment_cnt=config['min_comment_cnt'],
-                        target_sentiment=True,
-                        target_emotion=config['emotion'])
+                        target_sentiment=True)
         config['author_size'] = len(io.authors)
         config['topic_size'] = io.topic_size
         config['token_size'] = len(io.word2idx)

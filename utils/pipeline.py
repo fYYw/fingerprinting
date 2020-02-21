@@ -42,10 +42,9 @@ class Pipeline(object):
         self.global_step = 0
         self.train_log = "Epoch {0} Prog {1:.1f}% || Author: {2:.3f} || topic: {3:.3f} || v_tar: {4:.3f} " \
                          "|| v_track: {5:.3f} || f_tar: {6:.3f} || f_track: {7:.3f} || s_tar: {8:.3f} || " \
-                         "s_track: {9:.3f} || b_tar: {10:.3f} || b_track: {11:.3f} || e_tar: {12:.3f} || " \
-                         "e_track: {13:.3f} . "
-        self.train_loss = {'author': [0], 'v_pf': [0], 'f_pf': [0], 's_pf': [0], 'b_pf': [0], 'e_pf': [0],
-                           't_ax': [0], 'v_ax': [0], 'f_ax': [0], 's_ax': [0], 'b_ax': [0], 'e_ax': [0]}
+                         "s_track: {9:.3f} || b_tar: {10:.3f} || b_track: {11:.3f} || . "
+        self.train_loss = {'author': [0], 'v_pf': [0], 'f_pf': [0], 's_pf': [0], 'b_pf': [0],
+                           't_ax': [0], 'v_ax': [0], 'f_ax': [0], 's_ax': [0], 'b_ax': [0]}
 
         self.dev_best_f1 = 0
         self.dev_perf_log = ''
@@ -118,20 +117,6 @@ class Pipeline(object):
                 subj_loss = torch.zeros(1)
             loss += subj_loss
             loss_dict['b_pf'].append(subj_loss.item())
-
-        if self.config['emotion'] and un_freeze_fp:
-            loss_per_dim = []
-            e_tar = torch.tensor(fp_batch['e_tar'], device=self.device, dtype=torch.float)
-            for dim_ in [0, 1, 2, 3, 4, 5]:
-                pred = fp_result['emotion'][:, dim_]
-                e_even_idx = get_even_class(e_tar[:, dim_], device=self.device)
-                if e_even_idx is not None:
-                    tmp_e_loss = F.binary_cross_entropy_with_logits(pred.index_select(0, e_even_idx),
-                                                                    e_tar[:, dim_].index_select(0, e_even_idx))
-                    loss_per_dim.append(tmp_e_loss)
-            e_v_loss = sum(loss_per_dim) / len(loss_per_dim)
-            loss += e_v_loss
-            loss_dict['e_pf'].append(e_v_loss.item())
         return loss
 
     def get_aux_loss(self, batch_idx, examples, loss_dict):
@@ -156,8 +141,6 @@ class Pipeline(object):
             aux_targets.append('sent')
         if self.config['subj']:
             aux_targets.append('subj')
-        if self.config['emotion']:
-            aux_targets.append('emotion')
         if len(aux_targets) > 0:
             result = self.model(is_auxiliary=True,
                                 x=a_batch['comment'],
@@ -190,19 +173,6 @@ class Pipeline(object):
                                            b_tar.index_select(0, b_even_idx))
                 loss += b_v_loss
                 loss_dict['b_ax'].append(b_v_loss.item())
-
-            if self.config['emotion']:
-                loss_per_dim = []
-                e_tar = torch.tensor(a_batch['e_tar'], device=self.device, dtype=torch.float)
-                for dim_ in [0, 1, 2, 3, 4, 5]:
-                    pred = result['emotion'][:, dim_]
-                    e_even_idx = get_even_class(e_tar[:, dim_], device=self.device)
-                    tmp_e_loss = F.binary_cross_entropy_with_logits(pred.index_select(0, e_even_idx),
-                                                                    e_tar[:, dim_].index_select(0, e_even_idx))
-                    loss_per_dim.append(tmp_e_loss)
-                e_v_loss = sum(loss_per_dim) / 6.
-                loss += e_v_loss
-                loss_dict['e_ax'].append(e_v_loss.item())
         return loss
 
     def get_result(self, batch_idx, examples):
@@ -272,9 +242,7 @@ class Pipeline(object):
                         np.mean(self.train_loss['s_pf'][-self.config['check_step']:]),
                         np.mean(self.train_loss['s_ax'][-self.config['check_step']:]),
                         np.mean(self.train_loss['b_pf'][-self.config['check_step']:]),
-                        np.mean(self.train_loss['b_ax'][-self.config['check_step']:]),
-                        np.mean(self.train_loss['e_pf'][-self.config['check_step']:]),
-                        np.mean(self.train_loss['e_ax'][-self.config['check_step']:]))
+                        np.mean(self.train_loss['b_ax'][-self.config['check_step']:]))
                     print(train_log)
                     self.train_procedure.append(train_log)
 
@@ -283,14 +251,15 @@ class Pipeline(object):
 
                         if f1_ave > self.dev_best_f1:
                             self.dev_best_f1 = f1_ave
-
+                            self.dev_perf_log = perf_log
                             torch.save({'model': self.model.state_dict(),
                                         'adam': self.sgd.state_dict()},
                                        os.path.join(self.config['root_folder'],
                                                     self.config['outlet'], 'best_model.pt'))
                             _, test_perf, test_preds = self.get_perf(self.test_iter, self.test_examples)
                             self.test_perf_log = test_perf
-                            print(test_perf)
+                            print('DEV', self.dev_perf_log)
+                            print('TEST', self.test_perf_log)
                             with open(os.path.join(self.config['root_folder'],
                                                    self.config['outlet'], 'test_pred.txt'), 'w') as f:
                                 for pred in test_preds:
@@ -342,98 +311,38 @@ class Pipeline(object):
                 results['author'].append(author)
                 for y_p_name, y_t_name in zip(['vader', 'flair', 'sent', 'subj'],
                                               ['v_tar', 'f_tar', 's_tar', 'b_tar']):
-                    tar_value = fp_batch[y_t_name][j]
-                    pred_value = fp_result[y_p_name][j].item()
-                    pred_label_dis = [(pred_value - l) ** 2 for l in labels]
-                    label_idx = pred_label_dis.index(min(pred_label_dis))
-                    results[y_p_name][0].append(label_idx)
-                    results[y_p_name][1].append(tar_value)
-                    results[y_p_name][2].append((pred_value + 1 - tar_value) ** 2)
+                    if self.config[y_p_name]:
+                        tar_value = fp_batch[y_t_name][j]
+                        pred_value = fp_result[y_p_name][j].item()
+                        pred_label_dis = [(pred_value - l) ** 2 for l in labels]
+                        label_idx = pred_label_dis.index(min(pred_label_dis))
+                        # if pred_value > 0:
+                        #     label_idx = 2
+                        # elif pred_value < 0:
+                        #     label_idx = 0
+                        # else:
+                        #     label_idx = 1
+                        results[y_p_name][0].append(label_idx)
+                        results[y_p_name][1].append(tar_value)
+                        results[y_p_name][2].append((pred_value + 1 - tar_value) ** 2)
         self.model.train()
         perf_log = ''
         mean_f1 = []
+        packed_result = [results['author']]
         for y_name in ['vader', 'flair', 'sent', 'subj']:
-            [preds, tars, mses] = results[y_name]
-            f1_ = f1_score(tars, preds, labels=[0, 2], average='macro')
-            mse_ = 1.0 * sum(mses) / len(mses)
-            perf_log += "{0} f1: {1:.4f}, mse: {2:.4f}; ".format(y_name, f1_, mse_)
-            mean_f1.append(f1_)
+            if self.config[y_name]:
+                packed_result.extend([results[y_name][0], results[y_name][1]])
+                [preds, tars, mses] = results[y_name]
+                f1_ = f1_score(tars, preds, labels=[0, 2], average='macro')
+                mse_ = 1.0 * sum(mses) / len(mses)
+                perf_log += "{0} f1: {1:.4f}, mse: {2:.4f}; ".format(y_name, f1_, mse_)
+                if f1_ > 0:
+                    mean_f1.append(f1_)
         logs = [perf_log + '\n']
-        packed_result = zip(results['author'],
-                            results['vader'][0], results['vader'][1],
-                            results['flair'][0], results['flair'][1],
-                            results['sent'][0], results['sent'][1],
-                            results['subj'][0], results['subj'][1])
-        for au, vp, vt, fp, ft, sp, st, bp, bt in packed_result:
-            logs.append('{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n'.format(au, vp, vt,
-                                                                      fp, ft, sp, st, bp, bt))
+        packed_result = zip(*packed_result)
+        for records in packed_result:
+            logs.append('\t'.join(['{}' for _ in range(len(records))]).format(*records) + '\n')
         return 1.0 * sum(mean_f1) / len(mean_f1), perf_log, logs
-
-    def _get_perf(self, data_iter, examples):
-        pred_records = []
-        tmp_cnt = {'vader': [0, 0], 'flair': [0, 0], 'sent': [0, 0], 'subj': [0, 0],
-                   'emotion': [0, 0]}
-        tmp_pre_tar = {'vader': [[], []], 'flair': [[], []], 'sent': [[], []], 'subj': [[], []]}
-        acc = {'vader': 0, 'flair': 0, 'sent': 0, 'subj': 0,
-               'emotion': 0, 'mean': 0}
-        self.model.eval()
-        targets = set()
-        for i, batch_idx in enumerate(data_iter):
-            fp_batch, fp_result = self.get_result(batch_idx, examples)
-
-            for j, a in enumerate(fp_batch['author']):
-                pred_record = {'vader': [0, 0], 'flair': [0, 0], 'sent': [0, 0], 'subj': [0, 0],
-                               'emotion': [0, 0]}
-                if self.config['vader']:
-                    pred_record['vader'][0] = fp_result['vader'][j].argmax().item()
-                    pred_record['vader'][1] = fp_batch['v_tar'][j]
-                    tmp_cnt['vader'][int(pred_record['vader'][0] == pred_record['vader'][1])] += 1
-                    tmp_pre_tar['vader'][0].append(pred_record['vader'][0])
-                    tmp_pre_tar['vader'][1].append(pred_record['vader'][1])
-                    targets.add('vader')
-                if self.config['flair']:
-                    pred_record['flair'][0] = fp_result['flair'][j].argmax().item()
-                    pred_record['flair'][1] = fp_batch['f_tar'][j]
-                    tmp_cnt['flair'][int(pred_record['flair'][0] == pred_record['flair'][1])] += 1
-                    tmp_pre_tar['flair'][0].append(pred_record['flair'][0])
-                    tmp_pre_tar['flair'][1].append(pred_record['flair'][1])
-                    targets.add('flair')
-                if self.config['sent']:
-                    pred_record['sent'][0] = fp_result['sent'][j].argmax().item()
-                    pred_record['sent'][1] = fp_batch['s_tar'][j]
-                    tmp_cnt['sent'][int(pred_record['sent'][0] == pred_record['sent'][1])] += 1
-                    tmp_pre_tar['sent'][0].append(pred_record['sent'][0])
-                    tmp_pre_tar['sent'][1].append(pred_record['sent'][1])
-                    targets.add('sent')
-                if self.config['subj']:
-                    pred_record['subj'][0] = fp_result['subj'][j].argmax().item()
-                    pred_record['subj'][1] = fp_batch['b_tar'][j]
-                    tmp_cnt['subj'][int(pred_record['subj'][0] == pred_record['subj'][1])] += 1
-                    tmp_pre_tar['subj'][0].append(pred_record['subj'][0])
-                    tmp_pre_tar['subj'][1].append(pred_record['subj'][1])
-                    targets.add('subj')
-                if self.config['emotion']:
-                    pred_emo = [int(i > 0) for i in fp_result['emotion'][j].detach().tolist()]
-                    pred_record['emotion'][0] = pred_emo
-                    pred_record['emotion'][1] = fp_batch['e_tar'][j]
-                    tmp_cnt['emotion'][0] += sum([pred == gold for pred, gold in zip(*pred_record['emotion'])])
-                    tmp_cnt['emotion'][1] += sum([pred != gold for pred, gold in zip(*pred_record['emotion'])])
-                pred_records.append(pred_record)
-        self.model.train()
-        tmp_acc_sum = []
-        for key in targets:
-            acc[key] = 1.0 * tmp_cnt[key][1] / (tmp_cnt[key][0] + tmp_cnt[key][1])
-            tmp_acc_sum.append(acc[key])
-        if self.config['emotion']:
-            acc['emotion'] = 1.0 * tmp_cnt['emotion'][0] / (tmp_cnt['emotion'][0] + tmp_cnt['emotion'][1])
-            tmp_acc_sum.append(acc['emotion'])
-        acc['mean'] = sum(tmp_acc_sum) / len(tmp_acc_sum)
-        f1, f1_each = {}, []
-        for key, value in tmp_pre_tar.items():
-            f1[key] = f1_score(tmp_pre_tar[key][1], tmp_pre_tar[key][0], labels=[0, 2], average='macro')
-            f1_each.append(f1[key] * 2)
-        f1['mean'] = 1.0 * sum(f1_each) / (2 * len(f1_each))
-        return acc, f1, pred_records
 
 
 def track_grad(named_parameters, layers, ave_grads, max_grads):
