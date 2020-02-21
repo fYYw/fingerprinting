@@ -5,6 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from sklearn.metrics import f1_score
+from utils.misc_util import get_mse
 
 import torch
 import torch.nn as nn
@@ -21,10 +22,9 @@ class Pipeline(object):
                  config,
                  device):
         self.data_io = data_io
-        self.high_dev_examples, self.low_dev_examples = data_io.build_eval_examples(
-            split='dev', min_cnt=config['min_comment_cnt'], pre_cnt=config['previous_comment_cnt'])
-        self.high_dev_iter = data_io.build_iter_idx(self.high_dev_examples)
-        self.low_dev_iter = data_io.build_iter_idx(self.low_dev_examples)
+        self.dev_examples, _ = data_io.build_eval_examples(
+            split='dev', min_cnt=-1, pre_cnt=config['previous_comment_cnt'])
+        self.dev_iter = data_io.build_iter_idx(self.dev_examples)
         self.test_examples, _ = data_io.build_eval_examples(
             split='test', min_cnt=-1, pre_cnt=config['previous_comment_cnt'])
         self.test_iter = data_io.build_iter_idx(self.test_examples)
@@ -47,10 +47,9 @@ class Pipeline(object):
         self.train_loss = {'author': [0], 'v_pf': [0], 'f_pf': [0], 's_pf': [0], 'b_pf': [0], 'e_pf': [0],
                            't_ax': [0], 'v_ax': [0], 'f_ax': [0], 's_ax': [0], 'b_ax': [0], 'e_ax': [0]}
 
-        self.dev_perf = {'vader': 0, 'flair': 0, 'sent': 0, 'subj': 0,
-                         'emotion': 0, 'mean': 0}
-        self.test_perf = {'vader': 0, 'flair': 0, 'sent': 0, 'subj': 0,
-                          'emotion': 0, 'mean': 0}
+        self.dev_best_f1 = 0
+        self.dev_perf_log = ''
+        self.test_perf_log = ''
         self.train_procedure = []
 
         self.y_freq = {}
@@ -280,32 +279,28 @@ class Pipeline(object):
                     self.train_procedure.append(train_log)
 
                     if update_fp:
-                        _, high_dev_perf, _ = self.get_perf(self.high_dev_iter, self.high_dev_examples)
-                        # print('HIGH DEV: ', high_dev_perf)
+                        f1_ave, perf_log, _ = self.get_perf(self.dev_iter, self.dev_examples)
 
-                        if high_dev_perf['mean'] > self.dev_perf['mean']:
-                            self.dev_perf = high_dev_perf
-                            _, low_dev_perf, _ = self.get_perf(self.low_dev_iter, self.low_dev_examples)
+                        if f1_ave > self.dev_best_f1:
+                            self.dev_best_f1 = f1_ave
 
                             torch.save({'model': self.model.state_dict(),
                                         'adam': self.sgd.state_dict()},
                                        os.path.join(self.config['root_folder'],
                                                     self.config['outlet'], 'best_model.pt'))
                             _, test_perf, test_preds = self.get_perf(self.test_iter, self.test_examples)
-                            self.test_perf = test_perf
-
-                            json.dump(test_perf, open(os.path.join(
-                                self.config['root_folder'], self.config['outlet'], 'test_perf.json'), 'w'))
+                            self.test_perf_log = test_perf
+                            print(test_perf)
                             with open(os.path.join(self.config['root_folder'],
-                                                   self.config['outlet'], 'test_pred.jsonl'), 'w') as f:
+                                                   self.config['outlet'], 'test_pred.txt'), 'w') as f:
                                 for pred in test_preds:
-                                    data = json.dumps(pred)
-                                    f.write(data)
-                                    f.write('\n')
+                                    if pred.endswith('\n'):
+                                        f.write(pred)
+                                    else:
+                                        f.write(pred + '\n')
 
-            print('BEST DEV: ', self.dev_perf)
-            print('LOw DEV: ', low_dev_perf)
-            print('BEST TEST: ', self.test_perf)
+            print('BEST DEV: ', self.dev_perf_log)
+            print('BEST TEST: ', self.test_perf_log)
             # if self.config['check_grad']:
             # plt.bar(np.arange(len(grad_dict['max'])), grad_dict['max'], alpha=0.1, lw=1, color="c")
             # plt.bar(np.arange(len(grad_dict['max'])), grad_dict['ave'], alpha=0.1, lw=1, color="b")
@@ -331,7 +326,50 @@ class Pipeline(object):
             for line in self.train_procedure:
                 f.write(line + '\n')
 
-    def get_perf(self, data_iter, examples):
+    def get_perf(self, data_iter, examples, labels=(-1, 0, 1)):
+        results = {'author': [],
+                   'aid': [],
+                   'cid': [],
+                   'vader': [[], [], []],
+                   'flair': [[], [], []],
+                   'blob_sentiment': [[], [], []],
+                   'blob_subjective': [[], [], []],
+                   'mse': []}
+        self.model.eval()
+        for i, batch_idx in enumerate(data_iter):
+            fp_batch, fp_result = self.get_result(batch_idx, examples)
+            for j, author in enumerate(fp_batch['author']):
+                results['author'].append(author)
+                for y_p_name, y_t_name in zip(['vader', 'flair', 'sent', 'subj'],
+                                              ['v_tar', 'f_tar', 's_tar', 'b_tar']):
+                    tar_value = fp_batch[y_t_name][j]
+                    pred_value = fp_result[y_p_name][j].item()
+                    pred_label_dis = [(pred_value - l) ** 2 for l in labels]
+                    label_idx = pred_label_dis.index(min(pred_label_dis))
+                    results[y_p_name][0].append(label_idx)
+                    results[y_p_name][1].append(tar_value)
+                    results[y_p_name][2].append((pred_value + 1 - tar_value) ** 2)
+        self.model.train()
+        perf_log = ''
+        mean_f1 = []
+        for y_name in ['vader', 'flair', 'sent', 'subj']:
+            [preds, tars, mses] = results[y_name]
+            f1_ = f1_score(tars, preds, labels=[0, 2], average='macro')
+            mse_ = 1.0 * sum(mses) / len(mses)
+            perf_log += "{0} f1: {1:.4f}, mse: {2:.4f}; ".format(y_name, f1_, mse_)
+            mean_f1.append(f1_)
+        logs = [perf_log + '\n']
+        packed_result = zip(results['author'],
+                            results['vader'][0], results['vader'][1],
+                            results['flair'][0], results['flair'][1],
+                            results['sent'][0], results['sent'][1],
+                            results['subj'][0], results['subj'][1])
+        for au, vp, vt, fp, ft, sp, st, bp, bt in packed_result:
+            logs.append('{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n'.format(au, vp, vt,
+                                                                      fp, ft, sp, st, bp, bt))
+        return 1.0 * sum(mean_f1) / len(mean_f1), perf_log, logs
+
+    def _get_perf(self, data_iter, examples):
         pred_records = []
         tmp_cnt = {'vader': [0, 0], 'flair': [0, 0], 'sent': [0, 0], 'subj': [0, 0],
                    'emotion': [0, 0]}
@@ -392,7 +430,7 @@ class Pipeline(object):
         acc['mean'] = sum(tmp_acc_sum) / len(tmp_acc_sum)
         f1, f1_each = {}, []
         for key, value in tmp_pre_tar.items():
-            f1[key] = f1_score(tmp_pre_tar[key][1], tmp_pre_tar[key][0], labels=[1, 2], average='macro')
+            f1[key] = f1_score(tmp_pre_tar[key][1], tmp_pre_tar[key][0], labels=[0, 2], average='macro')
             f1_each.append(f1[key] * 2)
         f1['mean'] = 1.0 * sum(f1_each) / (2 * len(f1_each))
         return acc, f1, pred_records

@@ -194,20 +194,8 @@ def add_emotion_score(folder):
               open(os.path.join(folder, 'sentiment_emotion_comment.json'), 'w'))
 
 
-def emotion_test(folder):
-    # emotion_file = os.path.join(folder, 'emotion.pred')
-    example_tsv = os.path.join(folder, 'comments.tsv')
-    # print(len(open(emotion_file).readlines()))
-    # print(len(open(example_tsv, encoding='utf').readlines()))
-    for line in open(example_tsv, encoding='utf'):
-        cid, text = line.strip().split('\t')
-        t = re.sub(r'[^a-zA-Z0-9.?!]', '', text)
-        if len(t) == 0:
-            print(text)
-
-
-def test_tsv():
-    t = ['★', '“', '“', '§']
+def get_pretrain_vector():
+    pass
 
 
 if __name__ == '__main__':
@@ -223,7 +211,8 @@ if __name__ == '__main__':
         print("Working on {} ...".format(outlet))
         # bpe_article_comments(os.path.join(ROOT, outlet))
         # gen_examples(os.path.join(ROOT, outlet), percentile=60, min_count=4)
-        add_sentiment_score(os.path.join(ROOT, outlet))
+        # add_sentiment_score(os.path.join(ROOT, outlet))
         # emotion_test(os.path.join(ROOT, outlet))
         # add_emotion_score(os.path.join(ROOT, outlet))
+        get_pretrain_vector()
         print("Finish at {}\n".format(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())))

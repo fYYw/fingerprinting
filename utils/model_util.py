@@ -98,7 +98,7 @@ class NeuralCF(ModelBase):
         """
         :param author: (batch, )
         :param read_target: (batch, token_len) * 2
-        :param deivce: torch.device
+        :param device: torch.device
         :return:
         """
         result = {}
