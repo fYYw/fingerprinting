@@ -72,6 +72,7 @@ def main():
               'token_last_pool': args.token_last_pool,
               'free_fp': args.free_fp,
               'freeze_aux': args.freeze_aux,
+              'freeze_author': args.freeze_author,
               'track_grad': args.track_grad,
               'vader': args.vader,
               'flair': args.flair,

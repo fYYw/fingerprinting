@@ -67,6 +67,8 @@ def add_train_args(args=None):
                       help="Update fingerprinting component after # epoch. ")
     args.add_argument('--freeze_aux', type=int, default=1,
                       help="freeze updating auxiliary task after # epoch. ")
+    args.add_argument('--freeze_author', type=int, default=1,
+                      help="freeze updating author prediction task after # epoch. ")
     args.add_argument('--track_grad', type=str2bool, default=False)
     args.add_argument('--vader', type=str2bool, default=True)
     args.add_argument('--flair', type=str2bool, default=False)

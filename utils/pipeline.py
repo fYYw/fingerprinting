@@ -209,8 +209,7 @@ class Pipeline(object):
                     aux_loss = self.get_aux_loss(batch_idx, train_examples, self.train_loss)
                 else:
                     aux_loss = 0
-                update_author = (e <= self.config['free_fp']) and (
-                        e >= self.config['freeze_aux']) and self.config['build_author_predict']
+                update_author = e < self.config['freeze_author'] and self.config['build_author_predict']
                 update_fp = (e > self.config['free_fp']) or ((not update_author) and not update_aux)
                 fp_loss = self.get_fp_loss(fp_result, fp_batch, self.train_loss,
                                            un_freeze_fp=update_fp,
