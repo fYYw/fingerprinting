@@ -304,8 +304,8 @@ class Pipeline(object):
                    'cid': [],
                    'vader': [[], [], []],
                    'flair': [[], [], []],
-                   'blob_sentiment': [[], [], []],
-                   'blob_subjective': [[], [], []],
+                   'sent': [[], [], []],
+                   'subj': [[], [], []],
                    'mse': []}
         self.model.eval()
         for i, batch_idx in enumerate(data_iter):

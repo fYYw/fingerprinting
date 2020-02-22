@@ -55,7 +55,7 @@ def add_model_args(args=None):
 def add_train_args(args=None):
     args = args if args else argparse.ArgumentParser()
     args.add_argument('--lr', type=float, default=0.001)
-    args.add_argument('--epoch', type=int, default=400)
+    args.add_argument('--epoch', type=int, default=40)
     args.add_argument('--update_iter', type=int, default=1, help='Backward() without gradient step.')
     args.add_argument('--grad_clip', type=float, default=1.)
     args.add_argument('--batch_size', type=int, default=16)
@@ -63,11 +63,11 @@ def add_train_args(args=None):
     args.add_argument('--load_checkpoint', type=str2bool, default=False)
     args.add_argument('--build_auxiliary_task', type=str2bool, default=False)
     args.add_argument('--detach_article', type=str2bool, default=False)
-    args.add_argument('--free_fp', type=int, default=1,
+    args.add_argument('--free_fp', type=int, default=-1,
                       help="Update fingerprinting component after # epoch. ")
-    args.add_argument('--freeze_aux', type=int, default=1,
+    args.add_argument('--freeze_aux', type=int, default=-1,
                       help="freeze updating auxiliary task after # epoch. ")
-    args.add_argument('--freeze_author', type=int, default=1,
+    args.add_argument('--freeze_author', type=int, default=100,
                       help="freeze updating author prediction task after # epoch. ")
     args.add_argument('--track_grad', type=str2bool, default=False)
     args.add_argument('--vader', type=str2bool, default=True)
