@@ -72,6 +72,11 @@ class ModelBase(nn.Module):
         else:
             return pooled_result
 
+    def get_bilinear_score(self, network, authors, articles):
+        """ Authors: (batch, a_dim), articles: (batch, h_dim) """
+        tmp = network(articles).unsqueeze(-1)  # batch, a_dim, 1
+        return torch.bmm(authors.unsqueeze(1), tmp).squeeze(1).squeeze(1)  # batch, 1
+
 
 class NeuralCF(ModelBase):
     def __init__(self, config):
@@ -88,11 +93,6 @@ class NeuralCF(ModelBase):
             self.sent = nn.Linear(hid_dim, config['author_dim'], bias=False)
         if config['subj']:
             self.subj = nn.Linear(hid_dim, config['author_dim'], bias=False)
-
-    def get_score(self, network, authors, articles):
-        """ Authors: (batch, a_dim), articles: (batch, h_dim) """
-        tmp = network(articles).unsqueeze(-1)  # batch, a_dim, 1
-        return torch.bmm(authors.unsqueeze(1), tmp).squeeze(1).squeeze(1)  # batch, 1
 
     def forward(self, author, read_target, device, **kwargs):
         """
@@ -113,13 +113,13 @@ class NeuralCF(ModelBase):
                                          last_pool=self.config['token_last_pool'])
         author_embeds = self.author_embedding(author)
         if self.config['vader']:
-            result['vader'] = self.get_score(self.vader, author_embeds, article_target)
+            result['vader'] = self.get_bilinear_score(self.vader, author_embeds, article_target)
         if self.config['flair']:
-            result['flair'] = self.get_score(self.flair, author_embeds, article_target)
+            result['flair'] = self.get_bilinear_score(self.flair, author_embeds, article_target)
         if self.config['sent']:
-            result['sent'] = self.get_score(self.sent, author_embeds, article_target)
+            result['sent'] = self.get_bilinear_score(self.sent, author_embeds, article_target)
         if self.config['subj']:
-            result['subj'] = self.get_score(self.subj, author_embeds, article_target)
+            result['subj'] = self.get_bilinear_score(self.subj, author_embeds, article_target)
         return result
 
 
@@ -162,46 +162,55 @@ class Model(ModelBase):
         if config['build_author_predict']:
             self.author_predict = nn.Linear(author_final_dim, config['author_size'])
 
-        self.author_article_merge = nn.Sequential(
-            nn.Linear(author_final_dim + (config['hid_dim'] // 2) * int(config['token_last_pool']) +
-                      config['hid_dim'] * (int(config['token_max_pool']) +
-                                           int(config['token_mean_pool'])),
-                      config['hid_dim'] * 2),
-            nn.Tanh(),
-            nn.Linear(config['hid_dim'] * 2, config['hid_dim'] * 2),
-            nn.Tanh())
-
-        output_dim = 1 if config['loss_func'] == 'mse' else 3
-        if config['vader']:
-            self.vader = nn.Linear(config['hid_dim'] * 2, output_dim)
-        if config['flair']:
-            self.flair = nn.Linear(config['hid_dim'] * 2, output_dim)
-        if config['sent']:
-            self.sent = nn.Linear(config['hid_dim'] * 2, output_dim)
-        if config['subj']:
-            self.subj = nn.Linear(config['hid_dim'] * 2, output_dim)
+        hid_dim = (config['hid_dim'] // 2) * int(config['token_last_pool']) + config['hid_dim'] * (
+                int(config['token_max_pool']) + int(config['token_mean_pool']))
+        if config['loss_func'] == 'ce':
+            self.author_article_merge = nn.Sequential(
+                nn.Linear(author_final_dim + hid_dim,
+                          config['hid_dim'] * 2),
+                nn.Tanh(),
+                nn.Linear(config['hid_dim'] * 2, config['hid_dim'] * 2),
+                nn.Tanh())
+            if config['vader']:
+                self.vader = nn.Linear(config['hid_dim'] * 2, 3)
+            if config['flair']:
+                self.flair = nn.Linear(config['hid_dim'] * 2, 3)
+            if config['sent']:
+                self.sent = nn.Linear(config['hid_dim'] * 2, 3)
+            if config['subj']:
+                self.subj = nn.Linear(config['hid_dim'] * 2, 3)
+        elif config['loss_func'] == 'mse':
+            if config['vader']:
+                self.vader = nn.Bilinear(author_final_dim, hid_dim, 1, bias=False)
+            if config['flair']:
+                self.flair = nn.Bilinear(author_final_dim, hid_dim, 1, bias=False)
+            if config['sent']:
+                self.sent = nn.Bilinear(author_final_dim, hid_dim, 1, bias=False)
+            if config['subj']:
+                self.subj = nn.Bilinear(author_final_dim, hid_dim, 1, bias=False)
+        elif config['loss_func'] == 'ce-cf':
+            if config['vader']:
+                self.vader = nn.Bilinear(author_final_dim, hid_dim, 3, bias=False)
+            if config['flair']:
+                self.flair = nn.Bilinear(author_final_dim, hid_dim, 3, bias=False)
+            if config['sent']:
+                self.sent = nn.Bilinear(author_final_dim, hid_dim, 3, bias=False)
+            if config['subj']:
+                self.subj = nn.Bilinear(author_final_dim, hid_dim, 3, bias=False)
+        else:
+            raise NotImplementedError()
 
         if config['build_topic_predict']:
-            self.topic_predict = nn.Linear(config['hid_dim'] * (int(config['token_max_pool']) +
-                                                                int(config['token_mean_pool'])) +
-                                           (config['hid_dim'] // 2) * int(config['token_last_pool']),
+            self.topic_predict = nn.Linear(hid_dim,
                                            config['topic_size'])
         if config['vader']:
-            self.vader_predict = nn.Linear(config['hid_dim'] * (int(config['token_max_pool']) +
-                                                                int(config['token_mean_pool'])) +
-                                           (config['hid_dim'] // 2) * int(config['token_last_pool']), 3)
+            self.vader_predict = nn.Linear(hid_dim, 3)
         if config['flair']:
-            self.flair_predict = nn.Linear(config['hid_dim'] * (int(config['token_max_pool']) +
-                                                                int(config['token_mean_pool'])) +
-                                           (config['hid_dim'] // 2) * int(config['token_last_pool']), 3)
+            self.flair_predict = nn.Linear(hid_dim, 3)
         if config['sent']:
-            self.sent_predict = nn.Linear(config['hid_dim'] * (int(config['token_max_pool']) +
-                                                               int(config['token_mean_pool'])) +
-                                          (config['hid_dim'] // 2) * int(config['token_last_pool']), 3)
+            self.sent_predict = nn.Linear(hid_dim, 3)
         if config['subj']:
-            self.subj_predict = nn.Linear(config['hid_dim'] * (int(config['token_max_pool']) +
-                                                               int(config['token_mean_pool'])) +
-                                          (config['hid_dim'] // 2) * int(config['token_last_pool']), 3)
+            self.subj_predict = nn.Linear(hid_dim, 3)
 
     def fingerprint(self, author, read_target,
                     read_track, write_track, sentiment_track, device=torch.device('cpu')):
@@ -274,25 +283,49 @@ class Model(ModelBase):
             raise RuntimeError()
         if self.config['build_author_predict']:
             result['author'] = self.author_predict(author_embeds)
+        #
+        # if self.config['build_author_track']:
+        #     final_rep = self.author_article_merge(torch.cat([author_embeds,
+        #                                                      article_target], dim=-1))
+        # elif self.config['build_author_emb'] and not self.config['build_author_track']:
+        #     final_rep = self.author_article_merge(torch.cat([author_embeds,
+        #                                                      # article_target.detach()], dim=-1))
+        #                                                      article_target], dim=-1))
+        # else:
+        #     raise NotImplementedError()
 
-        if self.config['build_author_track']:
-            final_rep = self.author_article_merge(torch.cat([author_embeds.detach(),
-                                                             article_target.detach()], dim=-1))
-        elif self.config['build_author_emb'] and not self.config['build_author_track']:
+        if self.config['loss_func'] == 'ce':
             final_rep = self.author_article_merge(torch.cat([author_embeds,
-                                                             # article_target.detach()], dim=-1))
                                                              article_target], dim=-1))
+            if self.config['vader']:
+                result['vader'] = self.vader(final_rep)  # batch, seq, 3
+            if self.config['flair']:
+                result['flair'] = self.flair(final_rep)  # batch, seq, 3
+            if self.config['sent']:
+                result['sent'] = self.sent(final_rep)  # batch, seq, 3
+            if self.config['subj']:
+                result['subj'] = self.subj(final_rep)  # batch, seq, 3
+        elif self.config['loss_func'] == 'mse':
+            if self.config['vader']:
+                result['vader'] = self.vader(author_embeds, article_target).squeeze(-1)
+            if self.config['flair']:
+                result['flair'] = self.flair(author_embeds, article_target).squeeze(-1)
+            if self.config['sent']:
+                result['sent'] = self.sent(author_embeds, article_target).squeeze(-1)
+            if self.config['subj']:
+                result['subj'] = self.subj(author_embeds, article_target).squeeze(-1)
+
+        elif self.config['loss_func'] == 'ce-cf':
+            if self.config['vader']:
+                result['vader'] = self.vader(author_embeds, article_target)
+            if self.config['flair']:
+                result['flair'] = self.flair(author_embeds, article_target)
+            if self.config['sent']:
+                result['sent'] = self.sent(author_embeds, article_target)
+            if self.config['subj']:
+                result['subj'] = self.subj(author_embeds, article_target)
         else:
             raise NotImplementedError()
-
-        if self.config['flair']:
-            result['flair'] = self.flair(final_rep)  # batch, seq, 3
-        if self.config['vader']:
-            result['vader'] = self.vader(final_rep)
-        if self.config['sent']:
-            result['sent'] = self.sent(final_rep)
-        if self.config['subj']:
-            result['subj'] = self.subj(final_rep)
 
         return result
 

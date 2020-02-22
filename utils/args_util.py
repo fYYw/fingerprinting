@@ -28,14 +28,14 @@ def add_model_args(args=None):
     args.add_argument('--rnn_type', default='gru', choices=['lstm', 'gru'])
     args.add_argument('--hid_dim', type=int, default=256)
     args.add_argument('--token_dim', type=int, default=300)
-    args.add_argument('--dropout', type=float, default=0.)
+    args.add_argument('--dropout', type=float, default=0.2)
     args.add_argument('--rnn_layer', type=int, default=1)
     args.add_argument('--author_dim', type=int, default=256)
     args.add_argument('--author_track_dim', type=int, default=256)
     args.add_argument('--topic_dim', type=int, default=64)
     args.add_argument('--sentiment_dim', type=int, default=64)
-    args.add_argument('--build_author_emb', type=str2bool, default=True)
-    args.add_argument('--build_author_track', type=str2bool, default=False)
+    args.add_argument('--build_author_emb', type=str2bool, default=False)
+    args.add_argument('--build_author_track', type=str2bool, default=True)
     args.add_argument('--build_author_predict', type=str2bool, default=False)
     args.add_argument('--build_topic_predict', type=str2bool, default=False)
     args.add_argument('--leverage_topic', type=str2bool, default=False,
@@ -62,7 +62,7 @@ def add_train_args(args=None):
     args.add_argument('--check_step', type=int, default=100, help='Validate every # steps. ')
     args.add_argument('--load_checkpoint', type=str2bool, default=False)
     args.add_argument('--build_auxiliary_task', type=str2bool, default=False)
-    args.add_argument('--detach_article', type=str2bool, default=True)
+    args.add_argument('--detach_article', type=str2bool, default=False)
     args.add_argument('--free_fp', type=int, default=1,
                       help="Update fingerprinting component after # epoch. ")
     args.add_argument('--freeze_aux', type=int, default=1,
@@ -72,7 +72,7 @@ def add_train_args(args=None):
     args.add_argument('--flair', type=str2bool, default=False)
     args.add_argument('--sent', type=str2bool, default=False)
     args.add_argument('--subj', type=str2bool, default=False)
-    args.add_argument('--loss_func', default='mse', choices=['mse', 'ce'])
+    args.add_argument('--loss_func', default='ce-cf', choices=['mse', 'ce', 'ce-cf'])
     return args
 
 

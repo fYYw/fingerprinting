@@ -65,12 +65,12 @@ class Pipeline(object):
             v_tar = torch.tensor(fp_batch['v_tar'], device=self.device)
             v_even_idx = get_even_class(v_tar, device=self.device)
             if v_even_idx is not None:
-                if self.config['loss_func'] == 'ce':
-                    vader_loss = F.cross_entropy(fp_result['vader'].index_select(0, v_even_idx),
-                                                 v_tar.index_select(0, v_even_idx))
-                else:
+                if self.config['loss_func'] == 'mse':
                     vader_loss = F.mse_loss(fp_result['vader'].index_select(0, v_even_idx),
                                             v_tar.index_select(0, v_even_idx).float() - 1)
+                else:
+                    vader_loss = F.cross_entropy(fp_result['vader'].index_select(0, v_even_idx),
+                                                 v_tar.index_select(0, v_even_idx))
             else:
                 vader_loss = torch.zeros(1)
             loss += vader_loss
@@ -79,12 +79,13 @@ class Pipeline(object):
             f_tar = torch.tensor(fp_batch['f_tar'], device=self.device)
             f_even_idx = get_even_class(f_tar, device=self.device)
             if f_even_idx is not None:
-                if self.config['loss_func'] == 'ce':
-                    flair_loss = F.cross_entropy(fp_result['flair'].index_select(0, f_even_idx),
-                                                 f_tar.index_select(0, f_even_idx))
-                else:
+                if self.config['loss_func'] == 'mse':
                     flair_loss = F.mse_loss(fp_result['flair'].index_select(0, f_even_idx),
                                             f_tar.index_select(0, f_even_idx).float() - 1)
+
+                else:
+                    flair_loss = F.cross_entropy(fp_result['flair'].index_select(0, f_even_idx),
+                                                 f_tar.index_select(0, f_even_idx))
             else:
                 flair_loss = torch.zeros(1)
             loss += flair_loss
@@ -93,12 +94,12 @@ class Pipeline(object):
             s_tar = torch.tensor(fp_batch['s_tar'], device=self.device)
             s_even_idx = get_even_class(s_tar, device=self.device)
             if s_even_idx is not None:
-                if self.config['loss_func'] == 'ce':
-                    sent_loss = F.cross_entropy(fp_result['sent'].index_select(0, s_even_idx),
-                                                s_tar.index_select(0, s_even_idx))
-                else:
+                if self.config['loss_func'] == 'mse':
                     sent_loss = F.mse_loss(fp_result['sent'].index_select(0, s_even_idx),
                                            s_tar.index_select(0, s_even_idx).float() - 1)
+                else:
+                    sent_loss = F.cross_entropy(fp_result['sent'].index_select(0, s_even_idx),
+                                                s_tar.index_select(0, s_even_idx))
             else:
                 sent_loss = torch.zeros(1)
             loss += sent_loss
@@ -107,12 +108,12 @@ class Pipeline(object):
             b_tar = torch.tensor(fp_batch['b_tar'], device=self.device)
             b_even_idx = get_even_class(b_tar, device=self.device)
             if b_even_idx is not None:
-                if self.config['loss_func'] == 'ce':
-                    subj_loss = F.cross_entropy(fp_result['vader'].index_select(0, b_even_idx),
-                                                b_tar.index_select(0, b_even_idx))
-                else:
+                if self.config['loss_func'] == 'mse':
                     subj_loss = F.mse_loss(fp_result['subj'].index_select(0, b_even_idx),
                                            b_tar.index_select(0, b_even_idx).float() - 1)
+                else:
+                    subj_loss = F.cross_entropy(fp_result['subj'].index_select(0, b_even_idx),
+                                                b_tar.index_select(0, b_even_idx))
             else:
                 subj_loss = torch.zeros(1)
             loss += subj_loss
@@ -194,8 +195,8 @@ class Pipeline(object):
         for e in range(self.epoch):
             grad_dict = {'layer': [], 'ave': [], 'max': []}
             train_examples = self.data_io.build_train_examples(pre_cnt=self.config['previous_comment_cnt'],
-                                                               # min_cnt=self.config['min_comment_cnt'])
-                                                               min_cnt=0)
+                                                               min_cnt=self.config['min_comment_cnt'])
+            # min_cnt=0)
             train_iter = self.data_io.build_iter_idx(train_examples, True)
             if not self.y_freq:
                 for key, value in self.data_io.y_frequency.items():
@@ -270,6 +271,9 @@ class Pipeline(object):
 
             print('BEST DEV: ', self.dev_perf_log)
             print('BEST TEST: ', self.test_perf_log)
+
+            if e == 40:
+                print()
             # if self.config['check_grad']:
             # plt.bar(np.arange(len(grad_dict['max'])), grad_dict['max'], alpha=0.1, lw=1, color="c")
             # plt.bar(np.arange(len(grad_dict['max'])), grad_dict['ave'], alpha=0.1, lw=1, color="b")
@@ -313,18 +317,18 @@ class Pipeline(object):
                                               ['v_tar', 'f_tar', 's_tar', 'b_tar']):
                     if self.config[y_p_name]:
                         tar_value = fp_batch[y_t_name][j]
-                        pred_value = fp_result[y_p_name][j].item()
-                        pred_label_dis = [(pred_value - l) ** 2 for l in labels]
-                        label_idx = pred_label_dis.index(min(pred_label_dis))
-                        # if pred_value > 0:
-                        #     label_idx = 2
-                        # elif pred_value < 0:
-                        #     label_idx = 0
-                        # else:
-                        #     label_idx = 1
-                        results[y_p_name][0].append(label_idx)
+                        if self.config['loss_func'] == 'mse':
+                            pred_value = fp_result[y_p_name][j].item()
+                            pred_label_dis = [(pred_value - l) ** 2 for l in labels]
+                            label_idx = pred_label_dis.index(min(pred_label_dis))
+                            results[y_p_name][0].append(label_idx)
+                            results[y_p_name][2].append((pred_value + 1 - tar_value) ** 2)
+                        else:
+                            pred_value, label_idx = torch.max(fp_result[y_p_name][j], dim=-1)
+                            results[y_p_name][0].append(label_idx.item())
+                            results[y_p_name][2].append(-fp_result[y_p_name][j].softmax(-1)[tar_value].log().item())
                         results[y_p_name][1].append(tar_value)
-                        results[y_p_name][2].append((pred_value + 1 - tar_value) ** 2)
+
         self.model.train()
         perf_log = ''
         mean_f1 = []
@@ -342,7 +346,11 @@ class Pipeline(object):
         packed_result = zip(*packed_result)
         for records in packed_result:
             logs.append('\t'.join(['{}' for _ in range(len(records))]).format(*records) + '\n')
-        return 1.0 * sum(mean_f1) / len(mean_f1), perf_log, logs
+        if len(mean_f1) > 0:
+            mean_f1 = 1.0 * sum(mean_f1) / len(mean_f1)
+        else:
+            mean_f1 = 0.0
+        return mean_f1, perf_log, logs
 
 
 def track_grad(named_parameters, layers, ave_grads, max_grads):
