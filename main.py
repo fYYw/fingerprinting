@@ -88,7 +88,7 @@ def main():
         embedding = load_embedding(args.embedding_weight)
     else:
         embedding = None
-    for outlet in ['Archiveis', 'wsj', 'NewYorkTimes']:  # os.listdir(args.root_folder):
+    for outlet in ['Archiveis', 'wsj', 'NewYorkTimes', 'foxnews', 'theguardian', 'DailyMail']:  # os.listdir(args.root_folder):
         print("Working on {} ...".format(outlet))
         io = io_util.IO(folder_path=os.path.join(args.root_folder, outlet),
                         batch_size=config['batch_size'],
