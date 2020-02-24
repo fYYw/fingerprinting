@@ -17,8 +17,6 @@ class BaseLine(object):
         predict = {}
         result = {k: [[], []] for k in self.y_name}
         result['author'] = []
-        result['cid'] = []
-        result['aid'] = []
         for au_id, track in self.authors.items():
             tmp_track = track[: -2]
             if 0 < pre_count < len(tmp_track):
@@ -33,8 +31,6 @@ class BaseLine(object):
                 result[key][0].append(author_track_predict)
                 result[key][1].append(self.comments[track[-1]]['sentiment'][key])
             result['author'].append(au_id)
-            result['cid'].append(track[-1])
-            result['aid'].append(self.comments[track[-1]]['aid'])
         report_result(result, self.y_name, save_file)
 
 
