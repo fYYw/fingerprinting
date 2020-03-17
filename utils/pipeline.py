@@ -57,30 +57,26 @@ class Pipeline(object):
 
         result = self.model(x=a_batch['w_target'], device=self.device)
         v_tar = torch.tensor(a_batch['v_tar'], device=self.device)
-        v_even_idx = get_even_class(v_tar, device=self.device)
-        a_v_loss = F.cross_entropy(result['vader'].index_select(0, v_even_idx),
-                                   v_tar.index_select(0, v_even_idx))
+        a_v_loss = F.cross_entropy(result['vader'],
+                                   v_tar)
         loss += a_v_loss
         loss_dict['v_ax'].append(a_v_loss.item())
 
         f_tar = torch.tensor(a_batch['f_tar'], device=self.device)
-        f_even_idx = get_even_class(f_tar, device=self.device)
-        f_v_loss = F.cross_entropy(result['flair'].index_select(0, f_even_idx),
-                                   f_tar.index_select(0, f_even_idx))
+        f_v_loss = F.cross_entropy(result['flair'],
+                                   f_tar)
         loss += f_v_loss
         loss_dict['f_ax'].append(f_v_loss.item())
 
         s_tar = torch.tensor(a_batch['s_tar'], device=self.device)
-        s_even_idx = get_even_class(s_tar, device=self.device)
-        s_v_loss = F.cross_entropy(result['sent'].index_select(0, s_even_idx),
-                                   s_tar.index_select(0, s_even_idx))
+        s_v_loss = F.cross_entropy(result['sent'],
+                                   s_tar)
         loss += s_v_loss
         loss_dict['s_ax'].append(s_v_loss.item())
 
         b_tar = torch.tensor(a_batch['b_tar'], device=self.device)
-        b_even_idx = get_even_class(b_tar, device=self.device)
-        b_v_loss = F.cross_entropy(result['subj'].index_select(0, b_even_idx),
-                                   b_tar.index_select(0, b_even_idx))
+        b_v_loss = F.cross_entropy(result['subj'],
+                                   b_tar)
         loss += b_v_loss
         loss_dict['b_ax'].append(b_v_loss.item())
         return loss
@@ -162,7 +158,8 @@ class Pipeline(object):
                 f.write(line + '\n')
 
     def get_perf(self, data_iter, examples, labels=(-1, 0, 1)):
-        results = {'aid': [],
+        results = {'author': [],
+                   'aid': [],
                    'cid': [],
                    'vader': [[], [], []],
                    'flair': [[], [], []],
@@ -173,6 +170,7 @@ class Pipeline(object):
         for i, batch_idx in enumerate(data_iter):
             batch, result = self.get_result(batch_idx, examples)
             for j, author in enumerate(batch['author']):
+                results['author'].append(author)
                 for y_p_name, y_t_name in zip(['vader', 'flair', 'sent', 'subj'],
                                               ['v_tar', 'f_tar', 's_tar', 'b_tar']):
                     if self.config[y_p_name]:
