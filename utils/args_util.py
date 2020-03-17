@@ -36,7 +36,7 @@ def add_model_args(args=None):
     args.add_argument('--sentiment_dim', type=int, default=64)
     args.add_argument('--build_author_emb', type=str2bool, default=False)
     args.add_argument('--build_author_track', type=str2bool, default=True)
-    args.add_argument('--build_author_predict', type=str2bool, default=False)
+    args.add_argument('--build_author_predict', type=str2bool, default=True)
     args.add_argument('--build_topic_predict', type=str2bool, default=False)
     args.add_argument('--leverage_topic', type=str2bool, default=False,
                       help='Topic prediction to enrich track representation. ')
@@ -55,7 +55,7 @@ def add_model_args(args=None):
 def add_train_args(args=None):
     args = args if args else argparse.ArgumentParser()
     args.add_argument('--lr', type=float, default=0.001)
-    args.add_argument('--epoch', type=int, default=40)
+    args.add_argument('--epoch', type=int, default=10)
     args.add_argument('--update_iter', type=int, default=1, help='Backward() without gradient step.')
     args.add_argument('--grad_clip', type=float, default=1.)
     args.add_argument('--batch_size', type=int, default=16)
@@ -71,9 +71,9 @@ def add_train_args(args=None):
                       help="freeze updating author prediction task after # epoch. ")
     args.add_argument('--track_grad', type=str2bool, default=False)
     args.add_argument('--vader', type=str2bool, default=True)
-    args.add_argument('--flair', type=str2bool, default=False)
-    args.add_argument('--sent', type=str2bool, default=False)
-    args.add_argument('--subj', type=str2bool, default=False)
+    args.add_argument('--flair', type=str2bool, default=True)
+    args.add_argument('--sent', type=str2bool, default=True)
+    args.add_argument('--subj', type=str2bool, default=True)
     args.add_argument('--loss_func', default='ce-cf', choices=['mse', 'ce', 'ce-cf'])
     return args
 

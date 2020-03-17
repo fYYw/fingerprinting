@@ -51,171 +51,52 @@ class Pipeline(object):
         self.test_perf_log = ''
         self.train_procedure = []
 
-        self.y_freq = {}
-
-    def get_fp_loss(self, fp_result, fp_batch, loss_dict, un_freeze_fp, un_freeze_author):
+    def get_loss(self, batch_idx, examples, loss_dict):
         loss = 0
-        if self.config['build_author_predict'] and un_freeze_author:
-            author_loss = F.cross_entropy(fp_result['author'],
-                                          torch.tensor(fp_batch['author'], device=self.device))
-            loss += author_loss
-            loss_dict['author'].append(author_loss.item())
+        a_batch = self.data_io.get_batch(batch_idx, examples)
 
-        if self.config['vader'] and un_freeze_fp:
-            v_tar = torch.tensor(fp_batch['v_tar'], device=self.device)
-            v_even_idx = get_even_class(v_tar, device=self.device)
-            if v_even_idx is not None:
-                if self.config['loss_func'] == 'mse':
-                    vader_loss = F.mse_loss(fp_result['vader'].index_select(0, v_even_idx),
-                                            v_tar.index_select(0, v_even_idx).float() - 1)
-                else:
-                    vader_loss = F.cross_entropy(fp_result['vader'].index_select(0, v_even_idx),
-                                                 v_tar.index_select(0, v_even_idx))
-            else:
-                vader_loss = torch.zeros(1)
-            loss += vader_loss
-            loss_dict['v_pf'].append(vader_loss.item())
-        if self.config['flair'] and un_freeze_fp:
-            f_tar = torch.tensor(fp_batch['f_tar'], device=self.device)
-            f_even_idx = get_even_class(f_tar, device=self.device)
-            if f_even_idx is not None:
-                if self.config['loss_func'] == 'mse':
-                    flair_loss = F.mse_loss(fp_result['flair'].index_select(0, f_even_idx),
-                                            f_tar.index_select(0, f_even_idx).float() - 1)
+        result = self.model(x=a_batch['w_target'], device=self.device)
+        v_tar = torch.tensor(a_batch['v_tar'], device=self.device)
+        a_v_loss = F.cross_entropy(result['vader'],
+                                   v_tar)
+        loss += a_v_loss
+        loss_dict['v_ax'].append(a_v_loss.item())
 
-                else:
-                    flair_loss = F.cross_entropy(fp_result['flair'].index_select(0, f_even_idx),
-                                                 f_tar.index_select(0, f_even_idx))
-            else:
-                flair_loss = torch.zeros(1)
-            loss += flair_loss
-            loss_dict['f_pf'].append(flair_loss.item())
-        if self.config['sent'] and un_freeze_fp:
-            s_tar = torch.tensor(fp_batch['s_tar'], device=self.device)
-            s_even_idx = get_even_class(s_tar, device=self.device)
-            if s_even_idx is not None:
-                if self.config['loss_func'] == 'mse':
-                    sent_loss = F.mse_loss(fp_result['sent'].index_select(0, s_even_idx),
-                                           s_tar.index_select(0, s_even_idx).float() - 1)
-                else:
-                    sent_loss = F.cross_entropy(fp_result['sent'].index_select(0, s_even_idx),
-                                                s_tar.index_select(0, s_even_idx))
-            else:
-                sent_loss = torch.zeros(1)
-            loss += sent_loss
-            loss_dict['s_pf'].append(sent_loss.item())
-        if self.config['subj'] and un_freeze_fp:
-            b_tar = torch.tensor(fp_batch['b_tar'], device=self.device)
-            b_even_idx = get_even_class(b_tar, device=self.device)
-            if b_even_idx is not None:
-                if self.config['loss_func'] == 'mse':
-                    subj_loss = F.mse_loss(fp_result['subj'].index_select(0, b_even_idx),
-                                           b_tar.index_select(0, b_even_idx).float() - 1)
-                else:
-                    subj_loss = F.cross_entropy(fp_result['subj'].index_select(0, b_even_idx),
-                                                b_tar.index_select(0, b_even_idx))
-            else:
-                subj_loss = torch.zeros(1)
-            loss += subj_loss
-            loss_dict['b_pf'].append(subj_loss.item())
-        return loss
+        f_tar = torch.tensor(a_batch['f_tar'], device=self.device)
+        f_v_loss = F.cross_entropy(result['flair'],
+                                   f_tar)
+        loss += f_v_loss
+        loss_dict['f_ax'].append(f_v_loss.item())
 
-    def get_aux_loss(self, batch_idx, examples, loss_dict):
-        loss = 0
-        a_batch = self.data_io.get_batch_auxiliary(batch_idx, examples)
+        s_tar = torch.tensor(a_batch['s_tar'], device=self.device)
+        s_v_loss = F.cross_entropy(result['sent'],
+                                   s_tar)
+        loss += s_v_loss
+        loss_dict['s_ax'].append(s_v_loss.item())
 
-        if self.config['build_topic_predict']:
-            result = self.model(is_auxiliary=True,
-                                x=a_batch['article'],
-                                target=['topic'], device=self.device)
-            topic_loss = F.cross_entropy(result['topic'],
-                                         torch.tensor(a_batch['t_tar'], device=self.device))
-            loss += topic_loss
-            loss_dict['t_ax'].append(topic_loss.item())
-
-        aux_targets = []
-        if self.config['vader']:
-            aux_targets.append('vader')
-        if self.config['flair']:
-            aux_targets.append('flair')
-        if self.config['sent']:
-            aux_targets.append('sent')
-        if self.config['subj']:
-            aux_targets.append('subj')
-        if len(aux_targets) > 0:
-            result = self.model(is_auxiliary=True,
-                                x=a_batch['comment'],
-                                target=aux_targets, device=self.device)
-            if self.config['vader']:
-                v_tar = torch.tensor(a_batch['v_tar'], device=self.device)
-                v_even_idx = get_even_class(v_tar, device=self.device)
-                a_v_loss = F.cross_entropy(result['vader'].index_select(0, v_even_idx),
-                                           v_tar.index_select(0, v_even_idx))
-                loss += a_v_loss
-                loss_dict['v_ax'].append(a_v_loss.item())
-            if self.config['flair']:
-                f_tar = torch.tensor(a_batch['f_tar'], device=self.device)
-                f_even_idx = get_even_class(f_tar, device=self.device)
-                f_v_loss = F.cross_entropy(result['flair'].index_select(0, f_even_idx),
-                                           f_tar.index_select(0, f_even_idx))
-                loss += f_v_loss
-                loss_dict['f_ax'].append(f_v_loss.item())
-            if self.config['sent']:
-                s_tar = torch.tensor(a_batch['s_tar'], device=self.device)
-                s_even_idx = get_even_class(s_tar, device=self.device)
-                s_v_loss = F.cross_entropy(result['sent'].index_select(0, s_even_idx),
-                                           s_tar.index_select(0, s_even_idx))
-                loss += s_v_loss
-                loss_dict['s_ax'].append(s_v_loss.item())
-            if self.config['subj']:
-                b_tar = torch.tensor(a_batch['b_tar'], device=self.device)
-                b_even_idx = get_even_class(b_tar, device=self.device)
-                b_v_loss = F.cross_entropy(result['subj'].index_select(0, b_even_idx),
-                                           b_tar.index_select(0, b_even_idx))
-                loss += b_v_loss
-                loss_dict['b_ax'].append(b_v_loss.item())
+        b_tar = torch.tensor(a_batch['b_tar'], device=self.device)
+        b_v_loss = F.cross_entropy(result['subj'],
+                                   b_tar)
+        loss += b_v_loss
+        loss_dict['b_ax'].append(b_v_loss.item())
         return loss
 
     def get_result(self, batch_idx, examples):
-        fp_batch = self.data_io.get_batch_fingerprint(batch_idx, examples)
-        fp_result = self.model(is_auxiliary=False,
-                               author=fp_batch['author'],
-                               read_target=fp_batch['r_target'],
-                               read_track=fp_batch['r_track'],
-                               write_track=fp_batch['w_track'],
-                               sentiment_track=(fp_batch['v_tra'],
-                                                fp_batch['f_tra'],
-                                                fp_batch['s_tra'],
-                                                fp_batch['b_tra']),
-                               device=self.device)
-        return fp_batch, fp_result
+        batch = self.data_io.get_batch(batch_idx, examples)
+        result = self.model(x=batch['w_target'],
+                            device=self.device)
+        return batch, result
 
     def run(self):
-        low_dev_perf = 0
+        dev_perf = 0
         for e in range(self.epoch):
             grad_dict = {'layer': [], 'ave': [], 'max': []}
             train_examples = self.data_io.build_train_examples(pre_cnt=self.config['previous_comment_cnt'],
                                                                min_cnt=self.config['min_comment_cnt'])
             # min_cnt=0)
             train_iter = self.data_io.build_iter_idx(train_examples, True)
-            if not self.y_freq:
-                for key, value in self.data_io.y_frequency.items():
-                    self.y_freq[key] = torch.tensor(value, device=self.device, dtype=torch.float)
-
             for i, batch_idx in enumerate(train_iter):
-                fp_batch, fp_result = self.get_result(batch_idx, train_examples)
-                update_aux = self.config['build_auxiliary_task'] and e < self.config['freeze_aux']
-                if update_aux:
-                    aux_loss = self.get_aux_loss(batch_idx, train_examples, self.train_loss)
-                else:
-                    aux_loss = 0
-                update_author = e < self.config['freeze_author'] and self.config['build_author_predict']
-                update_fp = (e > self.config['free_fp']) or ((not update_author) and not update_aux)
-                fp_loss = self.get_fp_loss(fp_result, fp_batch, self.train_loss,
-                                           un_freeze_fp=update_fp,
-                                           un_freeze_author=update_author)
-
-                loss = fp_loss + aux_loss
+                loss = self.get_loss(batch_idx, train_examples, self.train_loss)
                 try:
                     loss.backward()
                     if self.config['track_grad']:
@@ -246,51 +127,29 @@ class Pipeline(object):
                     print(train_log)
                     self.train_procedure.append(train_log)
 
-                    if update_fp:
-                        f1_ave, perf_log, _ = self.get_perf(self.dev_iter, self.dev_examples)
+                    f1_ave, perf_log, _ = self.get_perf(self.dev_iter, self.dev_examples)
 
-                        if f1_ave > self.dev_best_f1:
-                            self.dev_best_f1 = f1_ave
-                            self.dev_perf_log = perf_log
-                            torch.save({'model': self.model.state_dict(),
-                                        'adam': self.sgd.state_dict()},
-                                       os.path.join(self.config['root_folder'],
-                                                    self.config['outlet'], 'best_model.pt'))
-                            _, test_perf, test_preds = self.get_perf(self.test_iter, self.test_examples)
-                            self.test_perf_log = test_perf
-                            print('DEV', self.dev_perf_log)
-                            print('TEST', self.test_perf_log)
-                            with open(os.path.join(self.config['root_folder'],
-                                                   self.config['outlet'], 'test_pred.txt'), 'w') as f:
-                                for pred in test_preds:
-                                    if pred.endswith('\n'):
-                                        f.write(pred)
-                                    else:
-                                        f.write(pred + '\n')
+                    if f1_ave > self.dev_best_f1:
+                        self.dev_best_f1 = f1_ave
+                        self.dev_perf_log = perf_log
+                        torch.save({'model': self.model.state_dict(),
+                                    'adam': self.sgd.state_dict()},
+                                   os.path.join(self.config['root_folder'],
+                                                self.config['outlet'], 'best_model.pt'))
+                        _, test_perf, test_preds = self.get_perf(self.test_iter, self.test_examples)
+                        self.test_perf_log = test_perf
+                        print('DEV', self.dev_perf_log)
+                        print('TEST', self.test_perf_log)
+                        with open(os.path.join(self.config['root_folder'],
+                                               self.config['outlet'], 'test_pred.txt'), 'w') as f:
+                            for pred in test_preds:
+                                if pred.endswith('\n'):
+                                    f.write(pred)
+                                else:
+                                    f.write(pred + '\n')
 
             print('BEST DEV: ', self.dev_perf_log)
             print('BEST TEST: ', self.test_perf_log)
-
-            if e == 40:
-                print()
-            # if self.config['check_grad']:
-            # plt.bar(np.arange(len(grad_dict['max'])), grad_dict['max'], alpha=0.1, lw=1, color="c")
-            # plt.bar(np.arange(len(grad_dict['max'])), grad_dict['ave'], alpha=0.1, lw=1, color="b")
-            # plt.hlines(0, 0, len(grad_dict['ave']) + 1, lw=2, color="k")
-            # plt.xticks(range(0, len(grad_dict['ave']), 1), grad_dict['layer'], rotation="vertical")
-            # plt.xlim(left=0, right=len(grad_dict['ave']))
-            # plt.ylim(bottom=-0.001, top=0.02)  # zoom in on the lower gradient regions
-            # plt.xlabel("Layers")
-            # plt.ylabel("average gradient")
-            # plt.title("Gradient flow")
-            # plt.grid(True)
-            # plt.legend([Line2D([0], [0], color="c", lw=4),
-            #             Line2D([0], [0], color="b", lw=4),
-            #             Line2D([0], [0], color="k", lw=4)], ['max-gradient', 'mean-gradient', 'zero-gradient'])
-            # saved_path = os.path.join(self.config['root_folder'], self.config['outlet'], 'grad_stat.png')
-            # plt.savefig(saved_path)
-            # plt.clf()
-
         json.dump(self.train_loss, open(os.path.join(
             self.config['root_folder'], self.config['outlet'], 'train_loss.json'), 'w'))
         with open(os.path.join(self.config['root_folder'],
@@ -309,23 +168,23 @@ class Pipeline(object):
                    'mse': []}
         self.model.eval()
         for i, batch_idx in enumerate(data_iter):
-            fp_batch, fp_result = self.get_result(batch_idx, examples)
-            for j, author in enumerate(fp_batch['author']):
+            batch, result = self.get_result(batch_idx, examples)
+            for j, author in enumerate(batch['author']):
                 results['author'].append(author)
                 for y_p_name, y_t_name in zip(['vader', 'flair', 'sent', 'subj'],
                                               ['v_tar', 'f_tar', 's_tar', 'b_tar']):
                     if self.config[y_p_name]:
-                        tar_value = fp_batch[y_t_name][j]
+                        tar_value = batch[y_t_name][j]
                         if self.config['loss_func'] == 'mse':
-                            pred_value = fp_result[y_p_name][j].item()
+                            pred_value = result[y_p_name][j].item()
                             pred_label_dis = [(pred_value - l) ** 2 for l in labels]
                             label_idx = pred_label_dis.index(min(pred_label_dis))
                             results[y_p_name][0].append(label_idx)
                             results[y_p_name][2].append((pred_value + 1 - tar_value) ** 2)
                         else:
-                            pred_value, label_idx = torch.max(fp_result[y_p_name][j], dim=-1)
+                            pred_value, label_idx = torch.max(result[y_p_name][j], dim=-1)
                             results[y_p_name][0].append(label_idx.item())
-                            results[y_p_name][2].append(-fp_result[y_p_name][j].softmax(-1)[tar_value].log().item())
+                            results[y_p_name][2].append(-result[y_p_name][j].softmax(-1)[tar_value].log().item())
                         results[y_p_name][1].append(tar_value)
 
         self.model.train()

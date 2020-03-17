@@ -1,4 +1,5 @@
 import os
+import copy
 import json
 from sklearn.metrics import f1_score
 
@@ -21,7 +22,7 @@ def distance_to_label(pred: list, label: list):
 
 def report_result(result, y_names, save_file):
     logs = []
-    packed_result = zip(result['author'], result['aid'], result['cid'],
+    packed_result = zip(result['author'],
                         result['vader'][0], result['vader'][1],
                         result['flair'][0], result['flair'][1],
                         result['blob_sentiment'][0], result['blob_sentiment'][1],

@@ -167,12 +167,6 @@ class IO(object):
         self.min_comment_cnt = min_comment_cnt
         self.max_seq_len = max_seq_len
 
-        self.y_update = False
-        self.y_frequency = {'vader': np.zeros((3,), dtype=float),
-                            'flair': np.zeros((3,), dtype=float),
-                            'sent': np.zeros((3,), dtype=float),
-                            'subj': np.zeros((3,), dtype=float)}
-
     def load_vocab(self, folder):
         for line in open(os.path.join(folder, 'vocab.token'), encoding='utf-8'):
             key, idx = line.strip().split('\t')
@@ -196,22 +190,10 @@ class IO(object):
                 example_id += 1
             else:
                 for i, cid in enumerate(tmp_track):
-                    if not self.y_update:
-                        comment = self.comments[cid]
-                        self.y_frequency['vader'][comment['sentiment']['vader']] += 1
-                        self.y_frequency['flair'][comment['sentiment']['flair']] += 1
-                        self.y_frequency['sent'][comment['sentiment']['blob_sentiment']] += 1
-                        self.y_frequency['subj'][comment['sentiment']['blob_subjective']] += 1
                     if i > len(tmp_track) - pre_cnt:  # 0:
+                        # (_, last, previous)
                         examples[example_id] = (author, tmp_track[i], tmp_track[max(-pre_cnt + i, 0): i])
                         example_id += 1
-        if not self.y_update:
-            for key, value in self.y_frequency.items():
-                tmp_value = value.sum() / value
-                tmp_value = np.nan_to_num(tmp_value, nan=0, posinf=0, neginf=0)
-                tmp_value /= np.min(tmp_value[tmp_value.nonzero()])
-                self.y_frequency[key] = tmp_value
-            self.y_update = True
         return examples
 
     def build_eval_examples(self, pre_cnt, min_cnt, split='dev'):
@@ -230,112 +212,25 @@ class IO(object):
                 raise NotImplementedError()
         return high_examples, low_examples
 
-    def get_batch_auxiliary(self, batch_idx, examples):
+    def get_batch(self, batch_idx, examples):
         batched_input = {}
-        a_uni, c_uni = set(), set()
-        article, comment = [], []
-        t_tar, v_tar, f_tar, s_tar, b_tar, e_tar = [], [], [], [], [], []
-        for idx in batch_idx:
-            for cid in examples[idx][2]:
-                if cid not in c_uni:
-                    c_uni.add(cid)
-                    comment.append(self.comments[cid]['bpe'])
-                    v_tar.append(self.comments[cid]['sentiment']['vader'])
-                    f_tar.append(self.comments[cid]['sentiment']['flair'])
-                    s_tar.append(self.comments[cid]['sentiment']['blob_sentiment'])
-                    b_tar.append(self.comments[cid]['sentiment']['blob_subjective'])
-
-                    aid = self.comments[cid]['aid']
-                    if aid not in a_uni:
-                        if len(self.articles[aid]['a_bpe']) == 0:
-                            a_bpe = self.articles[aid]['t_bpe']
-                        else:
-                            a_bpe = self.articles[aid]['a_bpe']
-                        article.append(a_bpe)
-                        t_tar.append(self.articles[aid]['topic'])
-        batched_input['article'] = pad_seq(article, pad_idx=0, max_word_seq=self.max_seq_len)
-        batched_input['t_tar'] = t_tar
-        batched_input['comment'] = pad_seq(comment, pad_idx=0, max_word_seq=self.max_seq_len)
-        batched_input['v_tar'] = v_tar
-        batched_input['f_tar'] = f_tar
-        batched_input['s_tar'] = s_tar
-        batched_input['b_tar'] = b_tar
-        # batched_input['e_tar'] = e_tar
-        return batched_input
-
-    def get_batch_fingerprint(self, batch_idx, examples):
-        batched_input = {}
-        author, r_tracks, w_tracks, r_target, w_target = [], [], [], [], []
-        v_tar, f_tar, s_tar, b_tar, e_tar = [], [], [], [], []
-        v_tra, f_tra, s_tra, b_tra, e_tra = [], [], [], [], []
+        author, w_target = [], []
+        v_tar, f_tar, s_tar, b_tar = [], [], [], []
         for idx in batch_idx:
             example = examples[idx]
             cid_tar = example[1]
-            pid = self.comments[cid_tar]['pid']
-            aid = self.comments[cid_tar]['aid']
-            if pid and pid in self.comments:
-                r_target.append(self.comments[pid]['bpe'])
-            elif pid == 'N' or not pid:
-                if len(self.articles[aid]['a_bpe']) == 0:
-                    a_bpe = self.articles[aid]['t_bpe']
-                else:
-                    a_bpe = self.articles[aid]['a_bpe']
-                r_target.append(a_bpe)
-            else:
-                continue
             author.append(int(example[0]))
-            w_target.append(self.comments[cid_tar]['bpe'])
             v_tar.append(self.comments[cid_tar]['sentiment']['vader'])
+            w_target.append(self.comments[cid_tar]['bpe'])
             f_tar.append(self.comments[cid_tar]['sentiment']['flair'])
             s_tar.append(self.comments[cid_tar]['sentiment']['blob_sentiment'])
             b_tar.append(self.comments[cid_tar]['sentiment']['blob_subjective'])
-
-            r_track, w_track = [], []
-            vader, flair, sent, subj = [], [], [], []
-            for cid in example[2]:
-                pid = self.comments[cid]['pid']
-                aid = self.comments[cid]['aid']
-                w_track.append(self.comments[cid]['bpe'])
-                if pid and pid in self.comments:
-                    r_track.append(self.comments[pid]['bpe'])
-                elif pid == 'N' or not pid:
-                    if len(self.articles[aid]['a_bpe']) == 0:
-                        a_bpe = self.articles[aid]['t_bpe']
-                    else:
-                        a_bpe = self.articles[aid]['a_bpe']
-                    r_track.append(a_bpe)
-                elif pid and pid not in self.comments:
-                    r_track.append([2])
-                else:
-                    print('Unseen PID', pid)
-                    raise NotImplementedError()
-                vader.append(self.comments[cid]['sentiment']['vader'])
-                flair.append(self.comments[cid]['sentiment']['flair'])
-                sent.append(self.comments[cid]['sentiment']['blob_sentiment'])
-                subj.append(self.comments[cid]['sentiment']['blob_subjective'])
-            r_tracks.append(r_track)
-            w_tracks.append(w_track)
-            v_tra.append(vader)
-            f_tra.append(flair)
-            s_tra.append(sent)
-            b_tra.append(subj)
         batched_input['author'] = author
-        batched_input['r_track'] = pad_seq_seq(r_tracks, pad_idx=0,
-                                               max_word_seq=self.max_seq_len, max_track_seq=-1)
-        batched_input['w_track'] = pad_seq_seq(w_tracks, pad_idx=0,
-                                               max_word_seq=self.max_seq_len, max_track_seq=-1)
-        batched_input['v_tra'] = pad_seq(v_tra, -1, max_word_seq=-1)[0]
-        batched_input['f_tra'] = pad_seq(f_tra, -1, max_word_seq=-1)[0]
-        batched_input['s_tra'] = pad_seq(s_tra, -1, max_word_seq=-1)[0]
-        batched_input['b_tra'] = pad_seq(b_tra, -1, max_word_seq=-1)[0]
-        # batched_input['e_tra'] = pad_seq(e_tra, -1, max_word_seq=-1)[0]
-        batched_input['r_target'] = pad_seq(r_target, pad_idx=0, max_word_seq=self.max_seq_len)
         batched_input['w_target'] = pad_seq(w_target, pad_idx=0, max_word_seq=self.max_seq_len)
         batched_input['v_tar'] = v_tar
         batched_input['f_tar'] = f_tar
         batched_input['s_tar'] = s_tar
         batched_input['b_tar'] = b_tar
-        # batched_input['e_tar'] = e_tar
         return batched_input
 
 
