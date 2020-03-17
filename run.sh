@@ -13,7 +13,7 @@ python main.py --random_seed 126 --gpu_id 0 \
 --build_sentiment_embedding False \
 --build_author_emb False \
 --build_author_track True \
---build_author_predict True \
+--build_author_predict False \
 --build_topic_predict False \
 --leverage_topic False \
 --lr 0.001 \
