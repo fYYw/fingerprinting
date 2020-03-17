@@ -84,14 +84,10 @@ class Model(ModelBase):
 
         hid_dim = (config['hid_dim'] // 2) * int(config['token_last_pool']) + config['hid_dim'] * (
                 int(config['token_max_pool']) + int(config['token_mean_pool']))
-        if config['vader']:
-            self.vader_predict = nn.Linear(hid_dim, 3)
-        if config['flair']:
-            self.flair_predict = nn.Linear(hid_dim, 3)
-        if config['sent']:
-            self.sent_predict = nn.Linear(hid_dim, 3)
-        if config['subj']:
-            self.subj_predict = nn.Linear(hid_dim, 3)
+        self.vader_predict = nn.Linear(hid_dim, 3)
+        self.flair_predict = nn.Linear(hid_dim, 3)
+        self.sent_predict = nn.Linear(hid_dim, 3)
+        self.subj_predict = nn.Linear(hid_dim, 3)
 
     def predict(self, x, device):
         result = {}
@@ -105,11 +101,10 @@ class Model(ModelBase):
         result['flair'] = self.flair_predict(embeds)
         result['sent'] = self.sent_predict(embeds)
         result['subj'] = self.subj_predict(embeds)
-        result['topic'] = self.topic_predict(embeds)
         return result
 
-    def forward(self, x, target, device):
-        return self.predict(x, target, device)
+    def forward(self, x, device):
+        return self.predict(x, device)
 
 
 def sort_tensor_len(lengths):

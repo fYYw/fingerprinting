@@ -55,39 +55,39 @@ class Pipeline(object):
         loss = 0
         a_batch = self.data_io.get_batch(batch_idx, examples)
 
-        result = self.model(device=self.device)
+        result = self.model(x=a_batch['w_target'], device=self.device)
         v_tar = torch.tensor(a_batch['v_tar'], device=self.device)
         v_even_idx = get_even_class(v_tar, device=self.device)
         a_v_loss = F.cross_entropy(result['vader'].index_select(0, v_even_idx),
-                                           v_tar.index_select(0, v_even_idx))
+                                   v_tar.index_select(0, v_even_idx))
         loss += a_v_loss
         loss_dict['v_ax'].append(a_v_loss.item())
 
         f_tar = torch.tensor(a_batch['f_tar'], device=self.device)
         f_even_idx = get_even_class(f_tar, device=self.device)
         f_v_loss = F.cross_entropy(result['flair'].index_select(0, f_even_idx),
-                                           f_tar.index_select(0, f_even_idx))
+                                   f_tar.index_select(0, f_even_idx))
         loss += f_v_loss
         loss_dict['f_ax'].append(f_v_loss.item())
 
         s_tar = torch.tensor(a_batch['s_tar'], device=self.device)
         s_even_idx = get_even_class(s_tar, device=self.device)
         s_v_loss = F.cross_entropy(result['sent'].index_select(0, s_even_idx),
-                                           s_tar.index_select(0, s_even_idx))
+                                   s_tar.index_select(0, s_even_idx))
         loss += s_v_loss
         loss_dict['s_ax'].append(s_v_loss.item())
 
         b_tar = torch.tensor(a_batch['b_tar'], device=self.device)
         b_even_idx = get_even_class(b_tar, device=self.device)
         b_v_loss = F.cross_entropy(result['subj'].index_select(0, b_even_idx),
-                                           b_tar.index_select(0, b_even_idx))
+                                   b_tar.index_select(0, b_even_idx))
         loss += b_v_loss
         loss_dict['b_ax'].append(b_v_loss.item())
         return loss
 
     def get_result(self, batch_idx, examples):
         batch = self.data_io.get_batch(batch_idx, examples)
-        result = self.model(x=batch['write_target'],
+        result = self.model(x=batch['w_target'],
                             device=self.device)
         return batch, result
 
@@ -131,27 +131,26 @@ class Pipeline(object):
                     print(train_log)
                     self.train_procedure.append(train_log)
 
-                    if update_fp:
-                        f1_ave, perf_log, _ = self.get_perf(self.dev_iter, self.dev_examples)
+                    f1_ave, perf_log, _ = self.get_perf(self.dev_iter, self.dev_examples)
 
-                        if f1_ave > self.dev_best_f1:
-                            self.dev_best_f1 = f1_ave
-                            self.dev_perf_log = perf_log
-                            torch.save({'model': self.model.state_dict(),
-                                        'adam': self.sgd.state_dict()},
-                                       os.path.join(self.config['root_folder'],
-                                                    self.config['outlet'], 'best_model.pt'))
-                            _, test_perf, test_preds = self.get_perf(self.test_iter, self.test_examples)
-                            self.test_perf_log = test_perf
-                            print('DEV', self.dev_perf_log)
-                            print('TEST', self.test_perf_log)
-                            with open(os.path.join(self.config['root_folder'],
-                                                   self.config['outlet'], 'test_pred.txt'), 'w') as f:
-                                for pred in test_preds:
-                                    if pred.endswith('\n'):
-                                        f.write(pred)
-                                    else:
-                                        f.write(pred + '\n')
+                    if f1_ave > self.dev_best_f1:
+                        self.dev_best_f1 = f1_ave
+                        self.dev_perf_log = perf_log
+                        torch.save({'model': self.model.state_dict(),
+                                    'adam': self.sgd.state_dict()},
+                                   os.path.join(self.config['root_folder'],
+                                                self.config['outlet'], 'best_model.pt'))
+                        _, test_perf, test_preds = self.get_perf(self.test_iter, self.test_examples)
+                        self.test_perf_log = test_perf
+                        print('DEV', self.dev_perf_log)
+                        print('TEST', self.test_perf_log)
+                        with open(os.path.join(self.config['root_folder'],
+                                               self.config['outlet'], 'test_pred.txt'), 'w') as f:
+                            for pred in test_preds:
+                                if pred.endswith('\n'):
+                                    f.write(pred)
+                                else:
+                                    f.write(pred + '\n')
 
             print('BEST DEV: ', self.dev_perf_log)
             print('BEST TEST: ', self.test_perf_log)

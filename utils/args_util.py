@@ -71,9 +71,9 @@ def add_train_args(args=None):
                       help="freeze updating author prediction task after # epoch. ")
     args.add_argument('--track_grad', type=str2bool, default=False)
     args.add_argument('--vader', type=str2bool, default=True)
-    args.add_argument('--flair', type=str2bool, default=False)
-    args.add_argument('--sent', type=str2bool, default=False)
-    args.add_argument('--subj', type=str2bool, default=False)
+    args.add_argument('--flair', type=str2bool, default=True)
+    args.add_argument('--sent', type=str2bool, default=True)
+    args.add_argument('--subj', type=str2bool, default=True)
     args.add_argument('--loss_func', default='ce-cf', choices=['mse', 'ce', 'ce-cf'])
     return args
 
