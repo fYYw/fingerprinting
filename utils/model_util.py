@@ -138,6 +138,37 @@ class NeuralCF(ModelBase):
         return result
 
 
+class NeuralCF2(ModelBase):
+    def __init__(self, config):
+        super(NeuralCF2, self).__init__(config)
+        self.author_embedding = nn.Embedding(config['author_size'], config['author_dim'])
+        hid_dim = (config['hid_dim'] // 2) * (2 * (int(config['token_max_pool'])
+                                                   + int(config['token_mean_pool']))
+                                              + int(config['token_last_pool'])) + config['author_dim']
+        self.vader = nn.Linear(hid_dim, 3)
+        self.flair = nn.Linear(hid_dim, 3)
+        self.subj = nn.Linear(hid_dim, 3)
+        self.sent = nn.Linear(hid_dim, 3)
+
+    def forward(self, author, read_target, device, **kwargs):
+        result = {}
+        author = torch.tensor(author, device=device)
+        # 0: tracks, 1: token_mask, 2: track_mask
+        read_target = [torch.tensor(r, device=device) for r in read_target]
+
+        article_target = self.rnn_encode(self.token_encoder,
+                                         self.token_embedding(read_target[0]), read_target[1],
+                                         max_pool=self.config['token_max_pool'],
+                                         mean_pool=self.config['token_mean_pool'],
+                                         last_pool=self.config['token_last_pool'])
+        author_embeds = self.author_embedding(author)
+        result['vader'] = self.vader(torch.cat([author_embeds, article_target], dim=-1))
+        result['flair'] = self.flair(torch.cat([author_embeds, article_target], dim=-1))
+        result['sent'] = self.sent(torch.cat([author_embeds, article_target], dim=-1))
+        result['subj'] = self.subj(torch.cat([author_embeds, article_target], dim=-1))
+        return result
+
+
 class Model(ModelBase):
     def __init__(self, config):
         super(Model, self).__init__(config)
