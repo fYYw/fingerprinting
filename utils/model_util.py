@@ -81,20 +81,31 @@ class NeuralCF(ModelBase):
                                               + int(config['token_last_pool']))
         self.author_embedding = nn.Embedding(config['author_size'], config['author_dim'])
         if config['vader']:
-            self.vader = nn.Linear(hid_dim, config['author_dim'], bias=False)
+            self.vader_1 = nn.Linear(hid_dim, config['author_dim'])
+            self.vader_2 = nn.Linear(hid_dim, config['author_dim'])
+            self.vader_3 = nn.Linear(hid_dim, config['author_dim'])
         if config['flair']:
-            self.flair = nn.Linear(hid_dim, config['author_dim'], bias=False)
+            self.flair_1 = nn.Linear(hid_dim, config['author_dim'])
+            self.flair_2 = nn.Linear(hid_dim, config['author_dim'])
+            self.flair_3 = nn.Linear(hid_dim, config['author_dim'])
         if config['sent']:
-            self.sent = nn.Linear(hid_dim, config['author_dim'], bias=False)
+            self.sent_1 = nn.Linear(hid_dim, config['author_dim'])
+            self.sent_2 = nn.Linear(hid_dim, config['author_dim'])
+            self.sent_3 = nn.Linear(hid_dim, config['author_dim'])
         if config['subj']:
-            self.subj = nn.Linear(hid_dim, config['author_dim'], bias=False)
+            self.subj_1 = nn.Linear(hid_dim, config['author_dim'])
+            self.subj_2 = nn.Linear(hid_dim, config['author_dim'])
+            self.subj_3 = nn.Linear(hid_dim, config['author_dim'])
 
-    def get_score(self, network, authors, articles):
+    def get_score(self, network_1, network_2, network_3, authors, articles):
         """ Authors: (batch, a_dim), articles: (batch, h_dim) """
-        tmp = network(articles).unsqueeze(-1)  # batch, a_dim, 1
-        return torch.bmm(authors.unsqueeze(1), tmp).squeeze(1).squeeze(1)  # batch, 1
+        tmp_1 = network_1(articles).unsqueeze(-1)  # batch, a_dim, 1
+        tmp_2 = network_2(articles).unsqueeze(-1)  # batch, a_dim, 1
+        tmp_3 = network_3(articles).unsqueeze(-1)  # batch, a_dim, 1
+        tmp = torch.cat((tmp_1, tmp_2, tmp_3), dim=-1)  # batch, a_dim, 3
+        return torch.bmm(authors.unsqueeze(1), tmp).squeeze(1)  # batch, 3
 
-    def forward(self, author, read_target, device):
+    def forward(self, author, read_target, device, **kwargs):
         """
         :param author: (batch, )
         :param read_target: (batch, token_len) * 2
@@ -113,13 +124,17 @@ class NeuralCF(ModelBase):
                                          last_pool=self.config['token_last_pool'])
         author_embeds = self.author_embedding(author)
         if self.config['vader']:
-            result['vader'] = self.get_score(self.vader, author_embeds, article_target)
+            result['vader'] = self.get_score(self.vader_1, self.vader_2, self.vader_3,
+                                             author_embeds, article_target)
         if self.config['flair']:
-            result['flair'] = self.get_score(self.flair, author_embeds, article_target)
+            result['flair'] = self.get_score(self.flair_1, self.flair_2, self.flair_3,
+                                             author_embeds, article_target)
         if self.config['sent']:
-            result['sent'] = self.get_score(self.sent, author_embeds, article_target)
+            result['sent'] = self.get_score(self.sent_1, self.sent_2, self.sent_3,
+                                            author_embeds, article_target)
         if self.config['subj']:
-            result['subj'] = self.get_score(self.subj, author_embeds, article_target)
+            result['subj'] = self.get_score(self.subj_1, self.subj_2, self.subj_3,
+                                            author_embeds, article_target)
         return result
 
 
@@ -255,20 +270,6 @@ class Model(ModelBase):
             else:
                 tracks = [reads, writes]
 
-            if self.config['build_sentiment_embedding']:
-                if self.config['vader']:
-                    tracks.append(self.vader_embed(torch.tensor(sentiment_track[0], device=device)))
-                if self.config['flair']:
-                    tracks.append(self.flair_embed(torch.tensor(sentiment_track[1], device=device)))
-                if self.config['sent']:
-                    tracks.append(self.sent_embed(torch.tensor(sentiment_track[2], device=device)))
-                if self.config['subj']:
-                    tracks.append(self.subj_embed(torch.tensor(sentiment_track[3], device=device)))
-                if self.config['build_topic_predict'] and self.config['leverage_topic']:
-                    predict_topic = F.softmax(self.topic_predict(reads).detach(), dim=-1)
-                    tracks.append(predict_topic)
-                if self.config['leverage_emotion']:
-                    tracks.append(torch.tensor(emotion_track, device=device, dtype=torch.float))
             track_embeds = torch.cat(tracks, dim=-1)
             track_embeds = torch.tanh(self.timestamp_merge(track_embeds))  # batch, track_len, dim
             tracks = self.rnn_encode(self.track_encoder, track_embeds, write_track[2],
@@ -283,18 +284,9 @@ class Model(ModelBase):
             author_embeds = author_embeds[0]
         else:
             raise RuntimeError()
-        if self.config['build_author_predict']:
-            result['author'] = self.author_predict(author_embeds)
 
-        if self.config['build_author_track']:
-            final_rep = self.author_article_merge(torch.cat([author_embeds.detach(),
-                                                             article_target.detach()], dim=-1))
-        elif self.config['build_author_emb'] and not self.config['build_author_track']:
-            final_rep = self.author_article_merge(torch.cat([author_embeds,
-                                                             # article_target.detach()], dim=-1))
-                                                             article_target], dim=-1))
-        else:
-            raise NotImplementedError()
+        final_rep = self.author_article_merge(torch.cat([author_embeds,
+                                                         article_target], dim=-1))
 
         if self.config['flair']:
             result['flair'] = self.flair(final_rep)  # batch, seq, 3
@@ -304,10 +296,6 @@ class Model(ModelBase):
             result['sent'] = self.sent(final_rep)
         if self.config['subj']:
             result['subj'] = self.subj(final_rep)
-
-        if self.config['emotion']:
-            result['emotion'] = self.emotion(final_rep)
-
         return result
 
     def auxiliary_predict(self, x, target, device):
@@ -339,12 +327,9 @@ class Model(ModelBase):
         return result
 
     def forward(self, is_auxiliary, **kwargs):
-        if is_auxiliary:
-            return self.auxiliary_predict(kwargs['x'], kwargs['target'], kwargs['device'])
-        else:
-            return self.fingerprint(author=kwargs['author'], read_target=kwargs['read_target'],
-                                    read_track=kwargs['read_track'], write_track=kwargs['write_track'],
-                                    sentiment_track=kwargs['sentiment_track'], device=kwargs['device'])
+        return self.fingerprint(author=kwargs['author'], read_target=kwargs['read_target'],
+                                read_track=kwargs['read_track'], write_track=kwargs['write_track'],
+                                sentiment_track=kwargs['sentiment_track'], device=kwargs['device'])
 
 
 def sort_tensor_len(lengths):

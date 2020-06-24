@@ -52,8 +52,6 @@ class Pipeline(object):
         self.test_perf_log = ''
         self.train_procedure = []
 
-        self.y_freq = {}
-
     def get_fp_loss(self, fp_result, fp_batch, loss_dict, un_freeze_fp, un_freeze_author):
         loss = 0
         if self.config['build_author_predict'] and un_freeze_author:
@@ -74,7 +72,7 @@ class Pipeline(object):
                                             v_tar.index_select(0, v_even_idx).float() - 1)
             else:
                 vader_loss = torch.zeros(1)
-            loss += vader_loss
+            loss = loss + vader_loss
             loss_dict['v_pf'].append(vader_loss.item())
         if self.config['flair'] and un_freeze_fp:
             f_tar = torch.tensor(fp_batch['f_tar'], device=self.device)
@@ -88,7 +86,7 @@ class Pipeline(object):
                                             f_tar.index_select(0, f_even_idx).float() - 1)
             else:
                 flair_loss = torch.zeros(1)
-            loss += flair_loss
+            loss = loss + flair_loss
             loss_dict['f_pf'].append(flair_loss.item())
         if self.config['sent'] and un_freeze_fp:
             s_tar = torch.tensor(fp_batch['s_tar'], device=self.device)
@@ -102,7 +100,7 @@ class Pipeline(object):
                                            s_tar.index_select(0, s_even_idx).float() - 1)
             else:
                 sent_loss = torch.zeros(1)
-            loss += sent_loss
+            loss = loss + sent_loss
             loss_dict['s_pf'].append(sent_loss.item())
         if self.config['subj'] and un_freeze_fp:
             b_tar = torch.tensor(fp_batch['b_tar'], device=self.device)
@@ -116,7 +114,7 @@ class Pipeline(object):
                                            b_tar.index_select(0, b_even_idx).float() - 1)
             else:
                 subj_loss = torch.zeros(1)
-            loss += subj_loss
+            loss = loss + subj_loss
             loss_dict['b_pf'].append(subj_loss.item())
 
         if self.config['emotion'] and un_freeze_fp:
@@ -227,25 +225,18 @@ class Pipeline(object):
                                                                # min_cnt=self.config['min_comment_cnt'])
                                                                min_cnt=0)
             train_iter = self.data_io.build_iter_idx(train_examples, True)
-            if not self.y_freq:
-                for key, value in self.data_io.y_frequency.items():
-                    self.y_freq[key] = torch.tensor(value, device=self.device, dtype=torch.float)
 
             for i, batch_idx in enumerate(train_iter):
                 fp_batch, fp_result = self.get_result(batch_idx, train_examples)
                 update_aux = self.config['build_auxiliary_task'] and e < self.config['freeze_aux']
-                if update_aux:
-                    aux_loss = self.get_aux_loss(batch_idx, train_examples, self.train_loss)
-                else:
-                    aux_loss = 0
-                update_author = (e <= self.config['free_fp']) and (
-                        e >= self.config['freeze_aux']) and self.config['build_author_predict']
-                update_fp = (e > self.config['free_fp']) or ((not update_author) and not update_aux)
+                # update_author = (e <= self.config['free_fp']) and (
+                #         e >= self.config['freeze_aux']) and self.config['build_author_predict']
+                # update_fp = (e > self.config['free_fp']) or ((not update_author) and not update_aux)
                 fp_loss = self.get_fp_loss(fp_result, fp_batch, self.train_loss,
-                                           un_freeze_fp=update_fp,
-                                           un_freeze_author=update_author)
+                                           un_freeze_fp=True,
+                                           un_freeze_author=True)
 
-                loss = fp_loss + aux_loss
+                loss = fp_loss
                 try:
                     loss.backward()
                     if self.config['track_grad']:
@@ -278,26 +269,26 @@ class Pipeline(object):
                     print(train_log)
                     self.train_procedure.append(train_log)
 
-                    if update_fp:
-                        f1_ave, perf_log, _ = self.get_perf(self.dev_iter, self.dev_examples)
+                    f1_ave, perf_log, _ = self.get_perf(self.dev_iter, self.dev_examples)
 
-                        if f1_ave > self.dev_best_f1:
-                            self.dev_best_f1 = f1_ave
+                    if f1_ave > self.dev_best_f1:
+                        self.dev_best_f1 = f1_ave
+                        self.dev_perf_log = perf_log
 
-                            torch.save({'model': self.model.state_dict(),
-                                        'adam': self.sgd.state_dict()},
-                                       os.path.join(self.config['root_folder'],
-                                                    self.config['outlet'], 'best_model.pt'))
-                            _, test_perf, test_preds = self.get_perf(self.test_iter, self.test_examples)
-                            self.test_perf_log = test_perf
-                            print(test_perf)
-                            with open(os.path.join(self.config['root_folder'],
-                                                   self.config['outlet'], 'test_pred.txt'), 'w') as f:
-                                for pred in test_preds:
-                                    if pred.endswith('\n'):
-                                        f.write(pred)
-                                    else:
-                                        f.write(pred + '\n')
+                        torch.save({'model': self.model.state_dict(),
+                                    'adam': self.sgd.state_dict()},
+                                   os.path.join(self.config['root_folder'],
+                                                self.config['outlet'], 'best_model.pt'))
+                        _, test_perf, test_preds = self.get_perf(self.test_iter, self.test_examples)
+                        self.test_perf_log = test_perf
+                        # print(test_perf)
+                        with open(os.path.join(self.config['root_folder'],
+                                               self.config['outlet'], 'test_pred.txt'), 'w') as f:
+                            for pred in test_preds:
+                                if pred.endswith('\n'):
+                                    f.write(pred)
+                                else:
+                                    f.write(pred + '\n')
 
             print('BEST DEV: ', self.dev_perf_log)
             print('BEST TEST: ', self.test_perf_log)
@@ -332,8 +323,8 @@ class Pipeline(object):
                    'cid': [],
                    'vader': [[], [], []],
                    'flair': [[], [], []],
-                   'blob_sentiment': [[], [], []],
-                   'blob_subjective': [[], [], []],
+                   'sent': [[], [], []],
+                   'subj': [[], [], []],
                    'mse': []}
         self.model.eval()
         for i, batch_idx in enumerate(data_iter):
@@ -343,20 +334,16 @@ class Pipeline(object):
                 for y_p_name, y_t_name in zip(['vader', 'flair', 'sent', 'subj'],
                                               ['v_tar', 'f_tar', 's_tar', 'b_tar']):
                     tar_value = fp_batch[y_t_name][j]
-                    pred_value = fp_result[y_p_name][j].item()
-                    pred_label_dis = [(pred_value - l) ** 2 for l in labels]
-                    label_idx = pred_label_dis.index(min(pred_label_dis))
-                    results[y_p_name][0].append(label_idx)
+                    pred_label = fp_result[y_p_name][j].argmax().item()
+                    results[y_p_name][0].append(pred_label)
                     results[y_p_name][1].append(tar_value)
-                    results[y_p_name][2].append((pred_value + 1 - tar_value) ** 2)
         self.model.train()
         perf_log = ''
         mean_f1 = []
         for y_name in ['vader', 'flair', 'sent', 'subj']:
-            [preds, tars, mses] = results[y_name]
+            preds, tars = results[y_name][0], results[y_name][1]
             f1_ = f1_score(tars, preds, labels=[0, 2], average='macro')
-            mse_ = 1.0 * sum(mses) / len(mses)
-            perf_log += "{0} f1: {1:.4f}, mse: {2:.4f}; ".format(y_name, f1_, mse_)
+            perf_log += "{0} f1: {1:.4f}, mse: {2:.4f}; ".format(y_name, f1_, 0.0)
             mean_f1.append(f1_)
         logs = [perf_log + '\n']
         packed_result = zip(results['author'],
