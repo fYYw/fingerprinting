@@ -73,102 +73,6 @@ class ModelBase(nn.Module):
             return pooled_result
 
 
-class NeuralCF(ModelBase):
-    def __init__(self, config):
-        super(NeuralCF, self).__init__(config)
-        hid_dim = (config['hid_dim'] // 2) * (2 * (int(config['token_max_pool'])
-                                                   + int(config['token_mean_pool']))
-                                              + int(config['token_last_pool']))
-        self.author_embedding = nn.Embedding(config['author_size'], config['author_dim'])
-        if config['vader']:
-            self.vader_1 = nn.Linear(hid_dim, config['author_dim'])
-            self.vader_2 = nn.Linear(hid_dim, config['author_dim'])
-            self.vader_3 = nn.Linear(hid_dim, config['author_dim'])
-        if config['flair']:
-            self.flair_1 = nn.Linear(hid_dim, config['author_dim'])
-            self.flair_2 = nn.Linear(hid_dim, config['author_dim'])
-            self.flair_3 = nn.Linear(hid_dim, config['author_dim'])
-        if config['sent']:
-            self.sent_1 = nn.Linear(hid_dim, config['author_dim'])
-            self.sent_2 = nn.Linear(hid_dim, config['author_dim'])
-            self.sent_3 = nn.Linear(hid_dim, config['author_dim'])
-        if config['subj']:
-            self.subj_1 = nn.Linear(hid_dim, config['author_dim'])
-            self.subj_2 = nn.Linear(hid_dim, config['author_dim'])
-            self.subj_3 = nn.Linear(hid_dim, config['author_dim'])
-
-    def get_score(self, network_1, network_2, network_3, authors, articles):
-        """ Authors: (batch, a_dim), articles: (batch, h_dim) """
-        tmp_1 = network_1(articles).unsqueeze(-1)  # batch, a_dim, 1
-        tmp_2 = network_2(articles).unsqueeze(-1)  # batch, a_dim, 1
-        tmp_3 = network_3(articles).unsqueeze(-1)  # batch, a_dim, 1
-        tmp = torch.cat((tmp_1, tmp_2, tmp_3), dim=-1)  # batch, a_dim, 3
-        return torch.bmm(authors.unsqueeze(1), tmp).squeeze(1)  # batch, 3
-
-    def forward(self, author, read_target, device, **kwargs):
-        """
-        :param author: (batch, )
-        :param read_target: (batch, token_len) * 2
-        :param device: torch.device
-        :return:
-        """
-        result = {}
-        author = torch.tensor(author, device=device)
-        # 0: tracks, 1: token_mask, 2: track_mask
-        read_target = [torch.tensor(r, device=device) for r in read_target]
-
-        article_target = self.rnn_encode(self.token_encoder,
-                                         self.token_embedding(read_target[0]), read_target[1],
-                                         max_pool=self.config['token_max_pool'],
-                                         mean_pool=self.config['token_mean_pool'],
-                                         last_pool=self.config['token_last_pool'])
-        author_embeds = self.author_embedding(author)
-        if self.config['vader']:
-            result['vader'] = self.get_score(self.vader_1, self.vader_2, self.vader_3,
-                                             author_embeds, article_target)
-        if self.config['flair']:
-            result['flair'] = self.get_score(self.flair_1, self.flair_2, self.flair_3,
-                                             author_embeds, article_target)
-        if self.config['sent']:
-            result['sent'] = self.get_score(self.sent_1, self.sent_2, self.sent_3,
-                                            author_embeds, article_target)
-        if self.config['subj']:
-            result['subj'] = self.get_score(self.subj_1, self.subj_2, self.subj_3,
-                                            author_embeds, article_target)
-        return result
-
-
-class NeuralCF2(ModelBase):
-    def __init__(self, config):
-        super(NeuralCF2, self).__init__(config)
-        self.author_embedding = nn.Embedding(config['author_size'], config['author_dim'])
-        hid_dim = (config['hid_dim'] // 2) * (2 * (int(config['token_max_pool'])
-                                                   + int(config['token_mean_pool']))
-                                              + int(config['token_last_pool'])) + config['author_dim']
-        self.vader = nn.Linear(hid_dim, 3)
-        self.flair = nn.Linear(hid_dim, 3)
-        self.subj = nn.Linear(hid_dim, 3)
-        self.sent = nn.Linear(hid_dim, 3)
-
-    def forward(self, author, read_target, device, **kwargs):
-        result = {}
-        author = torch.tensor(author, device=device)
-        # 0: tracks, 1: token_mask, 2: track_mask
-        read_target = [torch.tensor(r, device=device) for r in read_target]
-
-        article_target = self.rnn_encode(self.token_encoder,
-                                         self.token_embedding(read_target[0]), read_target[1],
-                                         max_pool=self.config['token_max_pool'],
-                                         mean_pool=self.config['token_mean_pool'],
-                                         last_pool=self.config['token_last_pool'])
-        author_embeds = self.author_embedding(author)
-        result['vader'] = self.vader(torch.cat([author_embeds, article_target], dim=-1))
-        result['flair'] = self.flair(torch.cat([author_embeds, article_target], dim=-1))
-        result['sent'] = self.sent(torch.cat([author_embeds, article_target], dim=-1))
-        result['subj'] = self.subj(torch.cat([author_embeds, article_target], dim=-1))
-        return result
-
-
 class Model(ModelBase):
     def __init__(self, config):
         super(Model, self).__init__(config)
@@ -196,8 +100,6 @@ class Model(ModelBase):
                     input_size += config['sentiment_dim']
             if config['build_topic_predict'] and config['leverage_topic']:
                 input_size += config['topic_size']
-            if config['leverage_emotion']:
-                input_size += 6
             self.timestamp_merge = nn.Linear(input_size, config['author_track_dim'])
             self.track_encoder = getattr(nn, config['rnn_type'].upper())(
                 input_size=config['author_track_dim'], hidden_size=config['hid_dim'],
@@ -228,8 +130,6 @@ class Model(ModelBase):
             self.sent = nn.Linear(config['hid_dim'] * 2, output_dim)
         if config['subj']:
             self.subj = nn.Linear(config['hid_dim'] * 2, output_dim)
-        if config['emotion']:
-            self.emotion = nn.Linear(config['hid_dim'] * 2, 6)
 
         if config['build_topic_predict']:
             self.topic_predict = nn.Linear(config['hid_dim'] * (int(config['token_max_pool']) +
@@ -252,20 +152,15 @@ class Model(ModelBase):
             self.subj_predict = nn.Linear(config['hid_dim'] * (int(config['token_max_pool']) +
                                                                int(config['token_mean_pool'])) +
                                           (config['hid_dim'] // 2) * int(config['token_last_pool']), 3)
-        if config['emotion']:
-            self.emotion_predict = nn.Linear(config['hid_dim'] * (int(config['token_max_pool']) +
-                                                                  int(config['token_mean_pool'])) +
-                                             (config['hid_dim'] // 2) * int(config['token_last_pool']), 6)
 
     def fingerprint(self, author, read_target,
-                    read_track, write_track, sentiment_track, emotion_track=None, device=torch.device('cpu')):
+                    read_track, write_track, sentiment_track, device=torch.device('cpu')):
         """
         :param author: (batch, )
         :param read_target: (batch, token_len) * 2
         :param read_track: (batch, track_len, token_len), (batch, track_len, token_len), (batch, track_len)
         :param write_track: (batch, track_len, token_len), (batch, track_len, token_len), (batch, track_len)
         :param sentiment_track: (batch, track_len) * 4
-        :param emotion_track: (batch, track_len, 6)
         :param device: torch.device
         :return: dict
         """
@@ -351,8 +246,6 @@ class Model(ModelBase):
             result['sent'] = self.sent_predict(embeds)
         if 'subj' in target:
             result['subj'] = self.subj_predict(embeds)
-        if 'emotion' in target:
-            result['emotion'] = self.emotion_predict(embeds)
         if 'topic' in target:
             result['topic'] = self.topic_predict(embeds)
         return result

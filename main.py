@@ -106,8 +106,7 @@ def main():
         config['token_size'] = len(io.word2idx)
         config['outlet'] = outlet
 
-        # model = model_util.Model(config)
-        model = model_util.NeuralCF2(config)
+        model = model_util.Model(config)
         sgd = torch.optim.Adam(model.parameters(), lr=config['lr'], amsgrad=True)
         # sgd = torch.optim.SGD(model.parameters(), lr=config['lr'])
         # sgd = torch.optim.RMSprop(model.parameters(), centered=True)

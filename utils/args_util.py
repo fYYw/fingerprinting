@@ -26,23 +26,16 @@ def add_general_args(args=None):
 def add_model_args(args=None):
     args = args if args else argparse.ArgumentParser()
     args.add_argument('--rnn_type', default='gru', choices=['lstm', 'gru'])
-    args.add_argument('--hid_dim', type=int, default=128)
+    args.add_argument('--hid_dim', type=int, default=256)
     args.add_argument('--token_dim', type=int, default=300)
-    args.add_argument('--dropout', type=float, default=0.)
+    args.add_argument('--dropout', type=float, default=0.2)
     args.add_argument('--rnn_layer', type=int, default=1)
-    args.add_argument('--author_dim', type=int, default=128)
-    args.add_argument('--author_track_dim', type=int, default=128)
+    args.add_argument('--author_dim', type=int, default=256)
+    args.add_argument('--author_track_dim', type=int, default=256)
     args.add_argument('--topic_dim', type=int, default=64)
-    args.add_argument('--emotion_dim', type=int, default=6)
     args.add_argument('--sentiment_dim', type=int, default=64)
     args.add_argument('--build_author_emb', type=str2bool, default=True)
     args.add_argument('--build_author_track', type=str2bool, default=False)
-    args.add_argument('--build_author_predict', type=str2bool, default=False)
-    args.add_argument('--build_topic_predict', type=str2bool, default=True)
-    args.add_argument('--leverage_topic', type=str2bool, default=False,
-                      help='Topic prediction to enrich track representation. ')
-    args.add_argument('--leverage_emotion', type=str2bool, default=False,
-                      help='Emotion labels to enrich track representation. ')
     args.add_argument('--build_sentiment_embedding', type=str2bool, default=False,
                       help='Sentiment embedding to enrich track representation. ')
     args.add_argument('--track_max_pool', type=str2bool, default=True)
@@ -51,8 +44,6 @@ def add_model_args(args=None):
     args.add_argument('--token_max_pool', type=str2bool, default=True)
     args.add_argument('--token_mean_pool', type=str2bool, default=False)
     args.add_argument('--token_last_pool', type=str2bool, default=True)
-    args.add_argument('--build_sentiment_predict', type=str2bool, default=True)
-    args.add_argument('--build_emotion_predict', type=str2bool, default=True)
     return args
 
 
@@ -62,21 +53,14 @@ def add_train_args(args=None):
     args.add_argument('--epoch', type=int, default=400)
     args.add_argument('--update_iter', type=int, default=1, help='Backward() without gradient step.')
     args.add_argument('--grad_clip', type=float, default=1.)
-    args.add_argument('--batch_size', type=int, default=16)
+    args.add_argument('--batch_size', type=int, default=64)
     args.add_argument('--check_step', type=int, default=100, help='Validate every # steps. ')
     args.add_argument('--load_checkpoint', type=str2bool, default=False)
-    args.add_argument('--build_auxiliary_task', type=str2bool, default=True)
-    args.add_argument('--detach_article', type=str2bool, default=True)
-    args.add_argument('--free_fp', type=int, default=1,
-                      help="Update fingerprinting component after # epoch. ")
-    args.add_argument('--freeze_aux', type=int, default=1,
-                      help="freeze updating auxiliary task after # epoch. ")
     args.add_argument('--track_grad', type=str2bool, default=False)
     args.add_argument('--vader', type=str2bool, default=True)
     args.add_argument('--flair', type=str2bool, default=True)
     args.add_argument('--sent', type=str2bool, default=True)
     args.add_argument('--subj', type=str2bool, default=True)
-    args.add_argument('--emotion', type=str2bool, default=False)
     args.add_argument('--loss_func', default='ce', choices=['mse', 'ce'])
     return args
 
